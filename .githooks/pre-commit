@@ -1,0 +1,12 @@
+#!/bin/sh
+# Leak guard for a public repo. Enable once per clone:
+#   git config core.hooksPath .githooks
+set -e
+denylist="${PUBLIC_DATA_DENYLIST:-$HOME/.config/cf-zone-failover/denylist}"
+if [ -f "$denylist" ]; then export PUBLIC_DATA_DENYLIST="$denylist"; else unset PUBLIC_DATA_DENYLIST; fi
+node scripts/public-data.mjs --authors
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "pre-commit: gitleaks is not installed, so secrets are not scanned. Install it (brew install gitleaks)." >&2
+  exit 1
+fi
+gitleaks git --staged --redact --no-banner .

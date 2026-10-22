@@ -4,22 +4,47 @@
   "description": "Keep a Cloudflare Workers site up when ISPs block your zone's IPs: a signed reserve proxy on another zone, and a guard that switches DNS to it and back.",
   "license": "MIT",
   "author": "Djinn Foundry",
-  "repository": { "type": "git", "url": "git+https://github.com/DjinnFoundry/cf-zone-failover.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DjinnFoundry/cf-zone-failover.git"
+  },
   "type": "module",
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
-    "./guard-worker": { "types": "./dist/guard-worker.d.ts", "default": "./dist/guard-worker.js" }
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./guard-worker": {
+      "types": "./dist/guard-worker.d.ts",
+      "default": "./dist/guard-worker.js"
+    }
   },
-  "files": ["dist", "README.md", "LICENSE", "docs"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "docs"
+  ],
   "sideEffects": false,
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "check": "npm run typecheck && npm test && npm run build && git diff --exit-code -- dist"
+    "check": "npm run typecheck && npm test && npm run build && git diff --exit-code -- dist",
+    "leaks": "node scripts/public-data.mjs --authors"
   },
-  "keywords": ["cloudflare", "workers", "failover", "dns", "isp-blocking", "laliga", "cloudflare-for-saas"],
-  "engines": { "node": ">=20" },
+  "keywords": [
+    "cloudflare",
+    "workers",
+    "failover",
+    "dns",
+    "isp-blocking",
+    "laliga",
+    "cloudflare-for-saas"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "devDependencies": {
     "@cloudflare/workers-types": "4.20260702.1",
     "typescript": "5.9.3",

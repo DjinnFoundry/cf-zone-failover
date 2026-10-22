@@ -167,6 +167,16 @@ Using it to keep content reachable that a court or authority has ordered blocked
 
 This notice does not change the license.
 
+## Contributing
+
+This repository is public and must stay free of anyone's real data: domains, emails, IPs, account or zone ids. CI fails on anything that is not documentation data (`example.com`, `.test`, RFC 5737 IPs) or a known public service, scans the history with gitleaks, and only accepts GitHub noreply commit identities. Enable the same check locally before your first commit:
+
+```bash
+git config core.hooksPath .githooks   # needs gitleaks installed
+```
+
+The hook also reads a private denylist from `~/.config/cf-zone-failover/denylist` (or `PUBLIC_DATA_DENYLIST`), one literal or `/regex/` per line, for names you want blocked without publishing them.
+
 ## License
 
 [MIT](LICENSE) © Djinn Foundry
