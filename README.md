@@ -7,7 +7,7 @@ Since February 2025 the main Spanish ISPs (Movistar, Orange, Vodafone, DIGI, Mas
 This package is what [ZetaRead](https://zetaread.com) built to get through it ([write-up](https://dgilperez.com/writing/cloudflare-workers-laliga-blocks)). It has two parts:
 
 - **A signed reserve proxy.** A second zone, served from other IPs, holds your public hostnames as Cloudflare for SaaS custom hostnames. Its Worker forwards each request, signed, to a Custom Domain of your main Worker. The origin checks the signature and rewrites the request to its public host, so the app does not notice.
-- **A guard.** A cron Worker reads per-ISP blocklists ([hayahora.futbol](https://hayahora.futbol) by default), and when one of your IPs is blocked it points your public hostnames at the reserve. After 30 minutes without a block it points them back. Between blocks it keeps the reserve's custom hostnames and certificates valid, and it mails you each time it acts or cannot.
+- **A guard.** A cron Worker reads per-ISP blocklists ([hayahora.futbol](https://hayahora.futbol) by default), and when one of your IPs is blocked it points your public hostnames at the reserve. When the block is over it points them back. Between blocks it keeps the reserve's custom hostnames and certificates valid, and it mails you each time it acts or cannot.
 
 ```
 Normal
@@ -29,7 +29,7 @@ Status: used in production by ZetaRead since October 2026. The reserve ran throu
 ## Requirements
 
 - Your site is a Cloudflare Worker served through **Custom Domains** on a zone (the *primary zone*).
-- A **second zone** whose IPs are not blocked (the *reserve zone*). It can be in another account. Check it in the blocklist history first: a zone created recently tends to land in the same ranges as yours.
+- A **second zone** whose IPs are not blocked (the *reserve zone*). It can be in another account. Check it in the blocklist history first: a recently created zone is likely to share your zone's ranges.
 - **Cloudflare for SaaS** on the reserve zone (custom hostnames; the first 100 are free).
 - Workers KV and, for the alerts, **Email Routing** with verified destinations on a zone you own.
 
