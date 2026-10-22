@@ -24,7 +24,7 @@ During a block
                                                                (undoes the hand-off)
 ```
 
-Status: used in production by ZetaRead since October 2026. The reserve ran through a real block on 2026-10-18, switched by hand. The guard is in automatic mode since 2026-10-20 and has passed a full drill outside a match: switching took about 4 s of API calls and public DNS followed in about 15 s. Read [What it does not do](#what-it-does-not-do) before you rely on it.
+Status: ZetaRead runs it in production. The reserve has been through a real block, switched by hand; the guard has passed a full rehearsal outside a match but not yet a real block. Read [What it does not do](#what-it-does-not-do) before you rely on it.
 
 ## Requirements
 
