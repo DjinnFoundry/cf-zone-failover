@@ -1,3 +1,6 @@
+/** The details block shared by every alert; only the labels are translated. */
+const detailsWith = (labels) => ({ reason, zoneIps, reserveIps, mode, runbook }) => `${reason}.\n\n${labels.zoneIps}: ${zoneIps.join(', ')}\n${labels.reserveIps}: ${reserveIps.join(', ')}\n${labels.mode}: ${mode}` +
+    (runbook ? `\nRunbook: ${runbook}` : '');
 const en = (c) => ({
     reason: {
         staleLists: `${c.blocklistName} lists are stale or unreadable`,
@@ -27,8 +30,7 @@ const en = (c) => ({
         activated: `${c.publicHost} is now served from ${c.fallbackHost}.\n\nDo not deploy the main Worker until the guard reports the way back: the deploy would fail recreating its Custom Domains.`,
         deactivated: `${c.publicHost} is back on its Worker.\n\nIf someone deployed ${c.worker} while the reserve was active, that deploy failed: run it again.`,
         failing: (error) => `Three runs in a row failed. The last one:\n\n${error}`,
-        details: ({ reason, zoneIps, reserveIps, mode, runbook }) => `${reason}.\n\nWatched zone IPs: ${zoneIps.join(', ')}\nWatched reserve IPs: ${reserveIps.join(', ')}\nMode: ${mode}` +
-            (runbook ? `\nRunbook: ${runbook}` : ''),
+        details: detailsWith({ zoneIps: 'Watched zone IPs', reserveIps: 'Watched reserve IPs', mode: 'Mode' }),
     },
     change: {
         recreated: (h) => `custom hostname ${h} recreated`,
@@ -66,8 +68,7 @@ const es = (c) => ({
         activated: `${c.publicHost} sirve ahora desde ${c.fallbackHost}.\n\nNo despliegues el Worker principal hasta que el vigía avise de la vuelta: el deploy fallaría al recrear los Custom Domains.`,
         deactivated: `${c.publicHost} vuelve a su Worker.\n\nSi alguien desplegó ${c.worker} con la reserva activa, ese deploy falló: relánzalo.`,
         failing: (error) => `Tres pasadas seguidas con error. La última:\n\n${error}`,
-        details: ({ reason, zoneIps, reserveIps, mode, runbook }) => `${reason}.\n\nIPs de la zona vigiladas: ${zoneIps.join(', ')}\nIPs de la reserva vigiladas: ${reserveIps.join(', ')}\nModo: ${mode}` +
-            (runbook ? `\nRunbook: ${runbook}` : ''),
+        details: detailsWith({ zoneIps: 'IPs de la zona vigiladas', reserveIps: 'IPs de la reserva vigiladas', mode: 'Modo' }),
     },
     change: {
         recreated: (h) => `custom hostname ${h} recreado`,

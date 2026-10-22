@@ -77,8 +77,10 @@ export function createReserve(apis: ReserveApis, config: ResolvedConfig): Reserv
     }
   }
 
-  async function removeCnames(): Promise<void> {
+  /** Removes the reserve CNAMEs and reattaches the Custom Domains. */
+  async function restorePrimary(): Promise<void> {
     for (const r of await reserveCnames()) await apis.primary('DELETE', `${zoneRecords}/${r.id}`);
+    await attachCustomDomains();
   }
 
   return {
@@ -103,16 +105,12 @@ export function createReserve(apis: ReserveApis, config: ResolvedConfig): Reserv
           });
         }
       } catch (error) {
-        await removeCnames();
-        await attachCustomDomains();
+        await restorePrimary();
         throw error;
       }
     },
 
-    async deactivate() {
-      await removeCnames();
-      await attachCustomDomains();
-    },
+    deactivate: restorePrimary,
 
     async maintain(say) {
       const changes: string[] = [];

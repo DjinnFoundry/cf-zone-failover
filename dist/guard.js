@@ -76,6 +76,7 @@ export function createGuard(config, label) {
             log({ mode, zoneResolved, reserveResolved, active, healthy, ...decision });
             const details = t.body.details({ reason: decision.reason, zoneIps, reserveIps, mode, runbook: deps.runbook });
             const subject = (s) => `${mode === 'observe' ? t.subject.observe : ''}${label}: ${s}`;
+            const withDetails = (text) => `${text}\n\n${details}`;
             /** An alert that would repeat every run goes out once per cooldown. */
             const notifyOnce = async (key, subj, body) => {
                 if (await state.get(`alert:${key}`))
@@ -86,12 +87,12 @@ export function createGuard(config, label) {
             // In observe mode nothing changes, so the same decision repeats every run.
             const notifyAction = mode === 'auto' ? notify : (subj, body) => notifyOnce(`observe:${decision.action}`, subj, body);
             if (decision.alert) {
-                await notifyOnce(decision.alert, subject(t.subject.problem), `${t.alert[decision.alert]}\n\n${details}`);
+                await notifyOnce(decision.alert, subject(t.subject.problem), withDetails(t.alert[decision.alert]));
             }
             if (decision.action === 'activate') {
                 if (mode === 'auto')
                     await reserve.activate();
-                await notifyAction(subject(t.subject.activated), `${t.body.activated}\n\n${details}`);
+                await notifyAction(subject(t.subject.activated), withDetails(t.body.activated));
             }
             else if (decision.action === 'deactivate') {
                 if (mode === 'auto') {
@@ -99,13 +100,13 @@ export function createGuard(config, label) {
                     // The next activation, automatic or manual, counts from zero.
                     await state.delete(LAST_BLOCKED);
                 }
-                await notifyAction(subject(t.subject.deactivated), `${t.body.deactivated}\n\n${details}`);
+                await notifyAction(subject(t.subject.deactivated), withDetails(t.body.deactivated));
             }
             else if (!active && mode === 'auto') {
                 const changes = await reserve.maintain(t.change);
                 if (changes.length > 0) {
                     log({ maintenance: changes });
-                    await notify(subject(t.subject.maintenance), `${changes.join('\n')}\n\n${details}`);
+                    await notify(subject(t.subject.maintenance), withDetails(changes.join('\n')));
                 }
             }
             return decision;
