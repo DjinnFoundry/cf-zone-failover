@@ -4,7 +4,7 @@ Keep a site on Cloudflare Workers reachable when ISPs block the IPs your zone is
 
 Since February 2025 the main Spanish ISPs (Movistar, Orange, Vodafone, DIGI, Masmovil) block, during LaLiga football matches, the Cloudflare IPs that LaLiga reports as carrying pirated streams. Those are shared IPs. Thousands of unrelated sites go dark on match days, with no error page, for every customer of those ISPs. Cloudflare does not reassign a zone's IPs on any plan, new zones land in the same ranges, and a Worker has no origin server you could expose instead.
 
-This package is what [ZetaRead](https://zetaread.com) built to get through it. It has two parts:
+This package is what [ZetaRead](https://zetaread.com) built to get through it ([write-up](https://dgilperez.com/writing/cloudflare-workers-laliga-blocks)). It has two parts:
 
 - **A signed reserve proxy.** A second zone, served from other IPs, holds your public hostnames as Cloudflare for SaaS custom hostnames. Its Worker forwards each request, signed, to a Custom Domain of your main Worker. The origin checks the signature and rewrites the request to its public host, so the app does not notice.
 - **A guard.** A cron Worker reads per-ISP blocklists ([hayahora.futbol](https://hayahora.futbol) by default), and when one of your IPs is blocked it points your public hostnames at the reserve. After 30 minutes without a block it points them back. Between blocks it keeps the reserve's custom hostnames and certificates valid, and it mails you each time it acts or cannot.
