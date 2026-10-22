@@ -1,0 +1,13 @@
+{
+  // The reserve proxy, on the reserve zone's account. See README, step 3.
+  "name": "failover-proxy",
+  "main": "proxy.ts",
+  "compatibility_date": "2026-09-01",
+  "workers_dev": false,
+  "observability": { "enabled": true },
+  "routes": [
+    { "pattern": "*/*", "zone_name": "reserve.example" },
+    { "pattern": "fallback.reserve.example/*", "zone_name": "reserve.example" }
+  ]
+  // Secret: FALLBACK_PROXY_SECRET, the same value as in the origin Worker(s).
+}

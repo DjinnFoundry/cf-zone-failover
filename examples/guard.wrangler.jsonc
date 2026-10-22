@@ -1,0 +1,19 @@
+{
+  // The guard: every 2 minutes it reads the blocklists and moves the public
+  // hostnames to the reserve and back. See README, step 4.
+  "name": "failover-guard",
+  "main": "guard.ts",
+  "compatibility_date": "2026-09-01",
+  "workers_dev": false,
+  "observability": { "enabled": true },
+  "triggers": { "crons": ["*/2 * * * *"] },
+  "kv_namespaces": [{ "binding": "STATE", "id": "<kv namespace id>" }],
+  "send_email": [{ "name": "ALERT_EMAIL", "allowed_destination_addresses": ["ops@example.com"] }],
+  "vars": {
+    "ALERT_FROM": "guard@example.com",
+    "ALERT_TO": "ops@example.com",
+    // `observe` first; `auto` once you trust it.
+    "GUARD_MODE": "observe"
+  }
+  // Secrets: CF_TOKEN_PRIMARY and CF_TOKEN_RESERVE (wrangler secret put).
+}
