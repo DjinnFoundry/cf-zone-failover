@@ -39,7 +39,6 @@
     "failover",
     "dns",
     "isp-blocking",
-    "laliga",
     "cloudflare-for-saas"
   ],
   "engines": {

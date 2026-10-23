@@ -159,14 +159,6 @@ and add any new pair you see later. The guard adds what it resolves, but that is
 - **It cannot help if the reserve zone gets blocked too.** It alerts and leaves the decision to you.
 - **The handover drops in-flight requests** for a few seconds while DNS changes.
 
-## Legal notice
-
-This project exists because legitimate sites become collateral damage of IP-level blocking orders that target someone else. It moves *your own* site to *your own* reserve zone on infrastructure you are entitled to use. It does not touch the ISPs' blocking systems, hide content, or bypass authentication.
-
-Using it to keep content reachable that a court or authority has ordered blocked, or to evade an order that names your site or your content, may be unlawful where you or your users are. You are solely responsible for complying with the law and with your providers' terms, including Cloudflare's. Nothing here is legal advice.
-
-This notice does not change the license.
-
 ## Contributing
 
 This repository is public and must stay free of anyone's real data: domains, emails, IPs, account or zone ids. CI fails on anything that is not documentation data (`example.com`, `.test`, RFC 5737 IPs) or a known public service, scans the history with gitleaks, and only accepts GitHub noreply commit identities. Enable the same check locally before your first commit:
