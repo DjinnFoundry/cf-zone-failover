@@ -11,7 +11,7 @@ export function createReserve(apis, site, config) {
     const records = `/zones/${site.zoneId}/dns_records`;
     const workerDomains = `/accounts/${site.accountId}/workers/domains`;
     const customHostnames = `/zones/${reserve.zoneId}/custom_hostnames`;
-    const pagesDomain = (h) => `/accounts/${site.accountId}/pages/projects/${h.project}/domains/${h.name}`;
+    const pagesDomain = (h) => `/accounts/${h.accountId ?? site.accountId}/pages/projects/${h.project}/domains/${h.name}`;
     const names = new Set(site.hosts.map((h) => h.name));
     const hasWorkers = site.hosts.some((h) => h.via === 'worker');
     const zoneRecords = () => apis.zone('GET', `${records}?per_page=1000`);

@@ -35,7 +35,8 @@ export declare const DEFAULT_TIMING: Timing;
  * - `pages`: a Pages custom domain (a proxied CNAME to the project's
  *   `pages.dev` name). The proxy fetches that name: `<project>.pages.dev`, or
  *   `subdomain` when Pages added a suffix because the name was taken
- *   (`example-docs-a1b.pages.dev`).
+ *   (`example-docs-a1b.pages.dev`). `accountId` is the project's account when
+ *   it is not the zone's.
  * - `origin`: any other proxied record, such as a tunnel or a server. The
  *   proxy fetches `origin`, a proxied record of the zone with the same target
  *   that never moves. The backend must answer to that name too (for a tunnel,
@@ -51,6 +52,7 @@ export type HostConfig = {
     via: 'pages';
     project: string;
     subdomain?: string;
+    accountId?: string;
 } | {
     name: string;
     via: 'origin';

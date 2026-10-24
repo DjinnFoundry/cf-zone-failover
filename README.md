@@ -35,7 +35,7 @@ Status: ZetaRead runs it in production, and the guard switched it on its own in 
 ## Install
 
 ```bash
-pnpm add github:DjinnFoundry/cf-zone-failover#v0.2.1
+pnpm add github:DjinnFoundry/cf-zone-failover#v0.2.2
 ```
 
 The compiled JavaScript is committed in `dist/`, so no build step runs on install.
@@ -90,7 +90,7 @@ How each kind of host is reached during a block:
 | `via` | Served normally by | The proxy fetches | You add |
 | --- | --- | --- | --- |
 | `worker` | a Worker Custom Domain | `origin`, another Custom Domain of the same Worker, signed | `fromFallbackProxy` in the Worker (step 2) |
-| `pages` | a Pages custom domain | `<project>.pages.dev`, or `subdomain` if Pages added a suffix | nothing |
+| `pages` | a Pages custom domain | `<project>.pages.dev`, or `subdomain` if Pages added a suffix | `accountId` if the project is in another account |
 | `origin` | a proxied record (tunnel, server) | `origin`, a proxied record with the same target | the backend must answer to `origin` (for a tunnel, an ingress rule with `httpHostHeader` set to the public name) |
 
 The guard creates the Worker origins, the origin records (copied from the public one) and the probes that are missing, so adding a site is a config entry and a deploy.

@@ -89,6 +89,15 @@ describe('a site of Pages and origin records', () => {
     expect(cf.world.calls).toContain(`PATCH /accounts/${DOCS.accountId}/pages/projects/example-docs/domains/example.org`);
   });
 
+  it('a Pages project in another account is revalidated there', async () => {
+    const cf = normalCloudflare({ pages: { 'example.org': 'deactivated' } });
+    const elsewhere: SiteConfig = { ...DOCS, hosts: [{ name: 'example.org', via: 'pages', project: 'example-docs', accountId: 'account-pages' }] };
+
+    await reserveOf(cf, elsewhere).maintain(say);
+
+    expect(cf.world.calls).toContain('PATCH /accounts/account-pages/pages/projects/example-docs/domains/example.org');
+  });
+
   it('a failure halfway puts every record back', async () => {
     const cf = normalCloudflare();
     const reserve = reserveOf(cf, DOCS);

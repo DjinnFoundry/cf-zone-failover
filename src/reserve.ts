@@ -73,7 +73,7 @@ export function createReserve(apis: SiteApis, site: SiteConfig, config: Pick<Res
   const workerDomains = `/accounts/${site.accountId}/workers/domains`;
   const customHostnames = `/zones/${reserve.zoneId}/custom_hostnames`;
   const pagesDomain = (h: Extract<HostConfig, { via: 'pages' }>) =>
-    `/accounts/${site.accountId}/pages/projects/${h.project}/domains/${h.name}`;
+    `/accounts/${h.accountId ?? site.accountId}/pages/projects/${h.project}/domains/${h.name}`;
   const names = new Set(site.hosts.map((h) => h.name));
   const hasWorkers = site.hosts.some((h) => h.via === 'worker');
 
