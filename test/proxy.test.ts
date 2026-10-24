@@ -51,7 +51,7 @@ describe('createFailoverProxy', () => {
     expect(sent().headers.get(shopHeaders.publicHost)).toBe('example.com');
   });
 
-  it('a Pages host is fetched from pages.dev, without its noindex, with path, method and body', async () => {
+  it('a Pages host is fetched from pages.dev with path, method and body, and its own headers come back', async () => {
     const { sent } = upstream(() => new Response('page', { headers: { 'x-robots-tag': 'noindex', 'content-type': 'text/html' } }));
 
     const response = await proxy.fetch(visit('https://example.org/contact?x=1', { method: 'POST', body: 'hello' }), env);
@@ -61,7 +61,7 @@ describe('createFailoverProxy', () => {
     expect(await sent().text()).toBe('hello');
     expect(sent().headers.get('x-forwarded-host')).toBe('example.org');
     expect(sent().headers.get('cookie')).toBe('a=1');
-    expect(response.headers.has('x-robots-tag')).toBe(false);
+    expect(response.headers.get('x-robots-tag')).toBe('noindex');
     expect(response.headers.get('content-type')).toBe('text/html');
     expect(await response.text()).toBe('page');
   });

@@ -40,8 +40,9 @@ export function proxyRoutes(sites) {
 /**
  * Plain hand-off to a target that serves the public name's content under its
  * own name (`pages.dev`, an origin record). Absolute redirects to the target
- * go back to the public name, and the `noindex` that `pages.dev` adds is
- * dropped so a block does not deindex the site.
+ * go back to the public name; every other header passes as is, so a site's
+ * own `x-robots-tag` survives. Production `pages.dev` names add none (only
+ * preview deployments do).
  */
 async function forward(request, host) {
     const publicHost = host.name;
@@ -68,8 +69,6 @@ async function forward(request, host) {
             out.headers.set('location', moved.toString());
         }
     }
-    if (host.via === 'pages')
-        out.headers.delete('x-robots-tag');
     return out;
 }
 /**

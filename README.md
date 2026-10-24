@@ -35,7 +35,7 @@ Status: ZetaRead runs it in production, and the guard switched it on its own in 
 ## Install
 
 ```bash
-pnpm add github:DjinnFoundry/cf-zone-failover#v0.2.2
+pnpm add github:DjinnFoundry/cf-zone-failover#v0.2.3
 ```
 
 The compiled JavaScript is committed in `dist/`, so no build step runs on install.
@@ -118,7 +118,7 @@ export default {
 
 `fromFallbackProxy` rewrites the URL **and the `Host` header**, and restores the visitor's IP in `cf-connecting-ip`. Frameworks such as OpenNext build the request URL from `Host`; left as the origin's, every middleware rewrite looks external and the Worker fetches itself over the internet.
 
-Pages and origin hosts get no signature: they see the request under their own name, with `x-forwarded-host` set to the public one. The proxy rewrites absolute redirects back to the public name and drops the `x-robots-tag: noindex` that `pages.dev` adds.
+Pages and origin hosts get no signature: they see the request under their own name, with `x-forwarded-host` set to the public one. The proxy rewrites absolute redirects back to the public name and passes every other header as is.
 
 ### 3. The reserve proxy Worker
 

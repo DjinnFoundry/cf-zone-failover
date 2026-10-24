@@ -1,6 +1,6 @@
 {
   "name": "cf-zone-failover",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Keep sites on Cloudflare up when ISPs block their zones' IPs: a reserve proxy on another zone, and a guard that switches each site's DNS to it and back.",
   "license": "MIT",
   "author": "Djinn Foundry",
