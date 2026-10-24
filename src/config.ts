@@ -46,8 +46,10 @@ export const DEFAULT_TIMING: Timing = {
  * - `worker`: a Custom Domain of a Worker. The proxy forwards, signed, to
  *   `origin`, another Custom Domain of the same Worker in the same zone, and
  *   the Worker undoes the hand-off with `createSigning().fromFallbackProxy`.
- * - `pages`: a Pages custom domain (a proxied CNAME to `<project>.pages.dev`).
- *   The proxy fetches `<project>.pages.dev`.
+ * - `pages`: a Pages custom domain (a proxied CNAME to the project's
+ *   `pages.dev` name). The proxy fetches that name: `<project>.pages.dev`, or
+ *   `subdomain` when Pages added a suffix because the name was taken
+ *   (`example-docs-a1b.pages.dev`).
  * - `origin`: any other proxied record, such as a tunnel or a server. The
  *   proxy fetches `origin`, a proxied record of the zone with the same target
  *   that never moves. The backend must answer to that name too (for a tunnel,
@@ -55,7 +57,7 @@ export const DEFAULT_TIMING: Timing = {
  */
 export type HostConfig =
   | { name: string; via: 'worker'; worker: string; origin: string }
-  | { name: string; via: 'pages'; project: string }
+  | { name: string; via: 'pages'; project: string; subdomain?: string }
   | { name: string; via: 'origin'; origin: string };
 
 /** One zone and the hostnames of it that move to the reserve together. */
@@ -137,7 +139,8 @@ export const envId = (id: string) => id.toUpperCase().replace(/-/g, '_');
 export const secretEnvOf = (site: SiteConfig) => site.secretEnv ?? `FALLBACK_SECRET_${envId(site.id)}`;
 
 /** The hostname the reserve proxy fetches for a public hostname. */
-export const targetOf = (host: HostConfig) => (host.via === 'pages' ? `${host.project}.pages.dev` : host.origin);
+export const targetOf = (host: HostConfig) =>
+  host.via === 'pages' ? (host.subdomain ?? `${host.project}.pages.dev`) : host.origin;
 
 /** Hostnames the reserve proxy fetches for a site: they must never move. */
 export const targetsOf = (site: SiteConfig) => site.hosts.map(targetOf);

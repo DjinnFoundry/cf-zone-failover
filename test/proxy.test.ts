@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createFailoverProxy } from '../src/proxy-worker.js';
 import { createSigning } from '../src/signing.js';
-import { CONFIG, SHOP } from './fixtures.js';
+import { CONFIG, DOCS, SHOP } from './fixtures.js';
 
 const proxy = createFailoverProxy(CONFIG);
 const env = { FALLBACK_SECRET_SHOP: 'shop-secret' };
@@ -64,6 +64,18 @@ describe('createFailoverProxy', () => {
     expect(response.headers.has('x-robots-tag')).toBe(false);
     expect(response.headers.get('content-type')).toBe('text/html');
     expect(await response.text()).toBe('page');
+  });
+
+  it('a Pages project with a suffixed pages.dev name is fetched there', async () => {
+    const { sent } = upstream();
+    const suffixed = createFailoverProxy({
+      ...CONFIG,
+      sites: [{ ...DOCS, hosts: [{ name: 'example.org', via: 'pages', project: 'example-docs', subdomain: 'example-docs-a1b.pages.dev' }] }],
+    });
+
+    await suffixed.fetch(visit('https://example.org/'), env);
+
+    expect(sent().url).toBe('https://example-docs-a1b.pages.dev/');
   });
 
   it('absolute redirects to the target go back to the public name; others are left alone', async () => {

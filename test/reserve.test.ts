@@ -73,6 +73,22 @@ describe('a site of Pages and origin records', () => {
     expect(await reserve.isActive()).toBe(false);
   });
 
+  it('a Pages project with a suffixed pages.dev name goes back to that name, and its API name is the project', async () => {
+    const cf = normalCloudflare({ pages: { 'example.org': 'deactivated' } });
+    cf.world.records.find((r) => r.name === 'example.org')!.content = 'example-docs-a1b.pages.dev';
+    const suffixed: SiteConfig = {
+      ...DOCS,
+      hosts: [{ name: 'example.org', via: 'pages', project: 'example-docs', subdomain: 'example-docs-a1b.pages.dev' }],
+    };
+    const reserve = reserveOf(cf, suffixed);
+    await reserve.activate();
+    await reserve.deactivate();
+
+    expect(served(cf, 'example.org')).toEqual(['CNAME example-docs-a1b.pages.dev proxied']);
+    await reserve.maintain(say);
+    expect(cf.world.calls).toContain(`PATCH /accounts/${DOCS.accountId}/pages/projects/example-docs/domains/example.org`);
+  });
+
   it('a failure halfway puts every record back', async () => {
     const cf = normalCloudflare();
     const reserve = reserveOf(cf, DOCS);

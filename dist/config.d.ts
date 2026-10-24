@@ -32,8 +32,10 @@ export declare const DEFAULT_TIMING: Timing;
  * - `worker`: a Custom Domain of a Worker. The proxy forwards, signed, to
  *   `origin`, another Custom Domain of the same Worker in the same zone, and
  *   the Worker undoes the hand-off with `createSigning().fromFallbackProxy`.
- * - `pages`: a Pages custom domain (a proxied CNAME to `<project>.pages.dev`).
- *   The proxy fetches `<project>.pages.dev`.
+ * - `pages`: a Pages custom domain (a proxied CNAME to the project's
+ *   `pages.dev` name). The proxy fetches that name: `<project>.pages.dev`, or
+ *   `subdomain` when Pages added a suffix because the name was taken
+ *   (`example-docs-a1b.pages.dev`).
  * - `origin`: any other proxied record, such as a tunnel or a server. The
  *   proxy fetches `origin`, a proxied record of the zone with the same target
  *   that never moves. The backend must answer to that name too (for a tunnel,
@@ -48,6 +50,7 @@ export type HostConfig = {
     name: string;
     via: 'pages';
     project: string;
+    subdomain?: string;
 } | {
     name: string;
     via: 'origin';

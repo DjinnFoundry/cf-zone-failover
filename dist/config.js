@@ -20,7 +20,7 @@ export const envId = (id) => id.toUpperCase().replace(/-/g, '_');
 /** Name of the proxy variable with a site's shared secret. */
 export const secretEnvOf = (site) => site.secretEnv ?? `FALLBACK_SECRET_${envId(site.id)}`;
 /** The hostname the reserve proxy fetches for a public hostname. */
-export const targetOf = (host) => (host.via === 'pages' ? `${host.project}.pages.dev` : host.origin);
+export const targetOf = (host) => host.via === 'pages' ? (host.subdomain ?? `${host.project}.pages.dev`) : host.origin;
 /** Hostnames the reserve proxy fetches for a site: they must never move. */
 export const targetsOf = (site) => site.hosts.map(targetOf);
 function validate(sites) {
