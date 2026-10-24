@@ -15,14 +15,48 @@ export const DEFAULT_TIMING = {
     ipMemoryMs: 24 * 3600_000,
 };
 export const DEFAULT_RESOLVERS = ['https://cloudflare-dns.com/dns-query', 'https://dns.google/resolve'];
+/** `my-site` → `MY_SITE`, for variable names. */
+export const envId = (id) => id.toUpperCase().replace(/-/g, '_');
+/** Name of the proxy variable with a site's shared secret. */
+export const secretEnvOf = (site) => site.secretEnv ?? `FALLBACK_SECRET_${envId(site.id)}`;
+/** The hostname the reserve proxy fetches for a public hostname. */
+export const targetOf = (host) => (host.via === 'pages' ? `${host.project}.pages.dev` : host.origin);
+/** Hostnames the reserve proxy fetches for a site: they must never move. */
+export const targetsOf = (site) => site.hosts.map(targetOf);
+function validate(sites) {
+    const fail = (message) => {
+        throw new Error(`cf-zone-failover: ${message}`);
+    };
+    if (sites.length === 0)
+        fail('no sites');
+    const ids = new Set();
+    const hosts = new Set();
+    for (const site of sites) {
+        if (!/^[a-z0-9-]+$/.test(site.id))
+            fail(`site id "${site.id}" must be a-z, 0-9 and -`);
+        if (ids.has(site.id))
+            fail(`site id "${site.id}" repeated`);
+        ids.add(site.id);
+        if (site.hosts.length === 0)
+            fail(`site ${site.id} has no hosts`);
+        const own = new Set(site.hosts.map((h) => h.name));
+        for (const name of own) {
+            if (hosts.has(name))
+                fail(`${name} is in more than one site`);
+            hosts.add(name);
+        }
+        for (const name of [site.probeHost, ...targetsOf(site)]) {
+            if (own.has(name))
+                fail(`${name} in site ${site.id} moves to the reserve, so it cannot be a probe or a target`);
+        }
+    }
+}
 export function resolveConfig(config) {
-    if (config.primary.publicHosts.length === 0)
-        throw new Error('cf-zone-failover: primary.publicHosts is empty');
+    validate(config.sites);
     const marker = config.dns?.marker ?? 'zone-failover';
     return {
-        primary: config.primary,
-        reserve: config.reserve,
-        seedIps: { zone: config.seedIps?.zone ?? [], reserve: config.seedIps?.reserve ?? [] },
+        reserve: { ...config.reserve, seedIps: config.reserve.seedIps ?? [] },
+        sites: config.sites,
         blocklist: config.blocklist ?? HAYAHORA,
         resolvers: config.resolvers ?? DEFAULT_RESOLVERS,
         timing: { ...DEFAULT_TIMING, ...config.timing },

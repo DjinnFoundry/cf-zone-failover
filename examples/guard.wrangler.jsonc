@@ -15,5 +15,5 @@
     // `observe` first; `auto` once you trust it.
     "GUARD_MODE": "observe"
   }
-  // Secrets: CF_TOKEN_PRIMARY and CF_TOKEN_RESERVE (wrangler secret put).
+  // Secrets: CF_TOKEN (or CF_TOKEN_<SITE ID> and CF_TOKEN_RESERVE), with wrangler secret put.
 }

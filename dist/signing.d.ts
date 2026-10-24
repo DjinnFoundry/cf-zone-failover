@@ -44,4 +44,8 @@ export interface Signing {
      */
     fromFallbackProxy(request: Request, secret: string | undefined): Request | Response | null;
 }
+/** `duplex` is required by undici (tests) for streamed bodies; Workers ignores it. */
+export type StreamingRequestInit = RequestInit & {
+    duplex?: 'half';
+};
 export declare function createSigning(config: SigningConfig): Signing;

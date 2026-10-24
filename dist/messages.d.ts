@@ -2,11 +2,13 @@ export type Locale = 'en' | 'es';
 export type Alert = 'stale-lists' | 'both-blocked' | 'reserve-unhealthy';
 /** What the messages need to know about the deployment. */
 export interface MessageContext {
-    publicHost: string;
+    /** The site's public hostnames. */
+    hosts: readonly string[];
     fallbackHost: string;
     healthUrl: string;
     blocklistName: string;
-    worker: string;
+    /** Workers whose Custom Domains move: a deploy of them fails while the reserve is active. */
+    workers: readonly string[];
 }
 export interface Messages {
     reason: {
@@ -46,6 +48,9 @@ export interface Messages {
         reactivated: (host: string) => string;
         txtAdded: (name: string) => string;
         txtRemoved: (name: string) => string;
+        restored: (host: string) => string;
+        targetCreated: (name: string) => string;
+        pagesRevalidated: (host: string, status: string) => string;
     };
 }
 export declare const LOCALES: Record<Locale, (c: MessageContext) => Messages>;

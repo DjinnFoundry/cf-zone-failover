@@ -9,5 +9,5 @@
     { "pattern": "*/*", "zone_name": "reserve.example" },
     { "pattern": "fallback.reserve.example/*", "zone_name": "reserve.example" }
   ]
-  // Secret: FALLBACK_PROXY_SECRET, the same value as in the origin Worker(s).
+  // Secrets: FALLBACK_SECRET_<SITE ID> for each site with Worker hosts, the same value as in its Worker(s).
 }

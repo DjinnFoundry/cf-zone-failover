@@ -6,11 +6,11 @@ import { NOW } from './fixtures.js';
 
 const RELEASE = DEFAULT_TIMING.releaseAfterMs;
 const reasons = LOCALES.en({
-  publicHost: 'example.com',
+  hosts: ['example.com'],
   fallbackHost: 'fallback.example.net',
   healthUrl: 'https://reserve-check.example.com/',
   blocklistName: 'lists',
-  worker: 'site',
+  workers: ['site'],
 }).reason;
 const base: Situation = {
   now: NOW,

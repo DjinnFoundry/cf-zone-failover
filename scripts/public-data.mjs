@@ -25,14 +25,17 @@ const ALLOWED_HOSTS = new Set([
   'github.com',
   'zetaread.com',
   'dgilperez.com',
+  'pages.dev',
 ]);
-const DOCUMENTATION_HOST = /(^|\.)(example\.(com|net|org)|example|test|invalid|localhost)$/;
+/** RFC 2606 names, and Pages projects named like them (`example-docs.pages.dev`). */
+const DOCUMENTATION_HOST = /(^|\.)(example\.(com|net|org)|example|test|invalid|localhost)$|^example[a-z0-9-]*\.pages\.dev$/;
 /** Public resolvers, loopback and RFC 5737 documentation ranges. */
 const ALLOWED_IP = /^(1\.1\.1\.1|8\.8\.8\.8|127\.0\.0\.1|0\.0\.0\.0|192\.0\.2\.\d+|198\.51\.100\.\d+|203\.0\.113\.\d+)$/;
 const ALLOWED_EMAIL_DOMAIN = /(^|\.)(example\.(com|net|org)|example|test|invalid|users\.noreply\.github\.com)$/;
 
-// Real TLDs only: `res.headers` or `config.js` are code, not hosts.
-const TLDS = 'com|net|org|io|dev|app|co|es|eu|uk|de|fr|it|pt|me|ai|xyz|info|biz|cloud|site|online|tech|futbol|google|example|test';
+// Real TLDs only: `res.headers` or `config.js` are code, not hosts. `.site` is
+// left out because `apis.site` is code too; the private denylist covers it.
+const TLDS = 'com|net|org|io|dev|app|co|es|eu|uk|de|fr|it|pt|me|ai|xyz|info|biz|cloud|online|tech|futbol|google|example|test';
 const HOST = new RegExp(`\\b((?:[a-z0-9-]+\\.)+(?:${TLDS}))\\b`, 'gi');
 const EMAIL = /\b[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b/g;
 const IPV4 = /\b(?:\d{1,3}\.){3}\d{1,3}\b/g;

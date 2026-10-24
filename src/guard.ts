@@ -1,17 +1,23 @@
-import { resolveConfig, type GuardConfig } from './config.js';
+import type { CfApi } from './cloudflare.js';
+import { resolveConfig, type FailoverConfig, type SiteConfig } from './config.js';
 import { decide, type Decision } from './decide.js';
-import { LOCALES } from './messages.js';
+import { LOCALES, type Messages } from './messages.js';
 import { blockingIsps, readBlocklists, reserveHealthy, resolveA } from './observe.js';
-import { createReserve, type ReserveApis } from './reserve.js';
+import { createReserve } from './reserve.js';
 
 export type GuardState = Pick<KVNamespace, 'get' | 'put' | 'delete'>;
 
 export interface GuardDeps {
-  apis: ReserveApis;
+  apis: {
+    /** Signs in the reserve zone. */
+    reserve: CfApi;
+    /** Signs in a site's account and zone. */
+    site: (site: SiteConfig) => CfApi;
+  };
   state: GuardState;
   notify: (subject: string, body: string) => Promise<void>;
   log: (entry: Record<string, unknown>) => void;
-  /** `observe` decides and alerts but touches nothing. */
+  /** `observe` decides and alerts but touches nothing. A site with `observe: true` is always observed. */
   mode: 'auto' | 'observe';
   now: number;
   fetcher?: typeof fetch;
@@ -19,7 +25,21 @@ export interface GuardDeps {
   runbook?: string;
 }
 
-const LAST_BLOCKED = 'lastBlockedAt';
+export interface SiteOutcome {
+  site: string;
+  decision?: Decision;
+  error?: string;
+}
+
+type Mode = GuardDeps['mode'];
+type Event = 'activated' | 'deactivated' | 'maintenance';
+
+/** Short, stable key for a text (KV keys are capped at 512 bytes). */
+const hash = (text: string) => {
+  let h = 5381;
+  for (let i = 0; i < text.length; i++) h = (h * 33) ^ text.charCodeAt(i);
+  return (h >>> 0).toString(36);
+};
 
 /** Seed IPs, those resolved now and those seen in the memory window; the memory is saved. */
 async function watchedIps(
@@ -49,98 +69,139 @@ async function watchedIps(
   return [...new Set([...seed, ...Object.keys(seen)])].sort();
 }
 
-/** One run of the guard. Meant for a cron every couple of minutes. */
-export function createGuard(config: GuardConfig, label: string) {
+/** One run of the guard over every site. Meant for a cron every couple of minutes. */
+export function createGuard(config: FailoverConfig, label: string) {
   const c = resolveConfig(config);
-  const t = LOCALES[c.locale]({
-    publicHost: c.primary.publicHosts[0]!,
-    fallbackHost: c.reserve.fallbackHost,
-    healthUrl: c.reserve.healthUrl,
-    blocklistName: c.blocklist.name,
-    worker: c.primary.worker,
-  });
+  const messagesOf = (site: SiteConfig): Messages =>
+    LOCALES[c.locale]({
+      hosts: site.hosts.map((h) => h.name),
+      fallbackHost: c.reserve.fallbackHost,
+      healthUrl: c.reserve.healthUrl,
+      blocklistName: c.blocklist.name,
+      workers: [...new Set(site.hosts.flatMap((h) => (h.via === 'worker' ? [h.worker] : [])))],
+    });
+  /** For what does not depend on a site: subjects and the failing alert. */
+  const messages = messagesOf(c.sites[0]!);
 
   return {
     config: c,
-    messages: t,
-    async run(deps: GuardDeps): Promise<Decision> {
-      const { apis, state, notify, log, mode, now, fetcher = fetch } = deps;
-      const reserve = createReserve(apis, c);
-
-      const [lists, zoneResolved, reserveResolved, active, healthy, storedLastBlocked] = await Promise.all([
-        readBlocklists(c.blocklist, { now, maxAgeMs: c.timing.maxListAgeMs }, fetcher),
-        resolveA(c.primary.probeHost, c.resolvers, fetcher),
-        resolveA(c.reserve.fallbackHost, c.resolvers, fetcher),
-        reserve.isActive(),
-        reserveHealthy(c.reserve.healthUrl, fetcher),
-        state.get(LAST_BLOCKED),
-      ]);
-
+    messages,
+    /** Runs every site even if one fails, mails what happened, then throws if any failed. */
+    async run(deps: GuardDeps): Promise<SiteOutcome[]> {
+      const { state, notify, log, now, fetcher = fetch } = deps;
       const memory = c.timing.ipMemoryMs;
-      const zoneIps = await watchedIps(state, 'seenIps:zone', c.seedIps.zone, zoneResolved, now, memory);
-      const reserveIps = await watchedIps(state, 'seenIps:reserve', c.seedIps.reserve, reserveResolved, now, memory);
-      const zoneBlockedBy = blockingIsps(lists, zoneIps);
-      let lastBlockedAt = storedLastBlocked ? Number(storedLastBlocked) : null;
-      // Reserve active with no record (activated by hand): count from now.
-      if (lists.fresh && (zoneBlockedBy.length > 0 || (active && lastBlockedAt === null))) {
-        lastBlockedAt = now;
-        await state.put(LAST_BLOCKED, String(now));
-      } else if (!active && lastBlockedAt !== null) {
-        // With the reserve off the date means nothing, and a later manual activation would be undone at once.
-        lastBlockedAt = null;
-        await state.delete(LAST_BLOCKED);
-      }
 
-      const decision = decide(
-        {
-          now,
-          listsFresh: lists.fresh,
-          zoneBlockedBy,
-          reserveBlockedBy: blockingIsps(lists, reserveIps),
-          reserveActive: active,
-          reserveHealthy: healthy,
-          lastBlockedAt,
-        },
-        { releaseAfterMs: c.timing.releaseAfterMs, reasons: t.reason },
-      );
-      log({ mode, zoneResolved, reserveResolved, active, healthy, ...decision });
-
-      const details = t.body.details({ reason: decision.reason, zoneIps, reserveIps, mode, runbook: deps.runbook });
-      const subject = (s: string) => `${mode === 'observe' ? t.subject.observe : ''}${label}: ${s}`;
-      const withDetails = (text: string) => `${text}\n\n${details}`;
+      const [lists, reserveResolved, healthy] = await Promise.all([
+        readBlocklists(c.blocklist, { now, maxAgeMs: c.timing.maxListAgeMs }, fetcher),
+        resolveA(c.reserve.fallbackHost, c.resolvers, fetcher),
+        reserveHealthy(c.reserve.healthUrl, fetcher),
+      ]);
+      const reserveIps = await watchedIps(state, 'reserve:seenIps', c.reserve.seedIps, reserveResolved, now, memory);
+      const reserveBlockedBy = blockingIsps(lists, reserveIps);
 
       /** An alert that would repeat every run goes out once per cooldown. */
-      const notifyOnce = async (key: string, subj: string, body: string) => {
+      const once = async (key: string, send: () => Promise<void>) => {
         if (await state.get(`alert:${key}`)) return;
-        await notify(subj, body);
+        await send();
         await state.put(`alert:${key}`, String(now), { expirationTtl: c.timing.alertCooldownS });
       };
-      // In observe mode nothing changes, so the same decision repeats every run.
-      const notifyAction = mode === 'auto' ? notify : (subj: string, body: string) => notifyOnce(`observe:${decision.action}`, subj, body);
+      // Actions of every site in this run, one mail per kind and mode.
+      const events = new Map<string, { kind: Event; mode: Mode; sites: string[]; bodies: string[] }>();
+      const report = (kind: Event, mode: Mode, site: string, body: string) => {
+        const key = `${kind}:${mode}`;
+        const e = events.get(key) ?? { kind, mode, sites: [], bodies: [] };
+        e.sites.push(site);
+        e.bodies.push(body);
+        events.set(key, e);
+      };
+      const subject = (mode: Mode, s: string) => `${mode === 'observe' ? messages.subject.observe : ''}${label}: ${s}`;
 
-      if (decision.alert) {
-        await notifyOnce(decision.alert, subject(t.subject.problem), withDetails(t.alert[decision.alert]));
+      async function runSite(site: SiteConfig): Promise<Decision> {
+        const st = messagesOf(site);
+        const mode: Mode = site.observe ? 'observe' : deps.mode;
+        const reserve = createReserve({ zone: deps.apis.site(site), reserve: deps.apis.reserve }, site, c);
+        const lastKey = `${site.id}:lastBlockedAt`;
+
+        const [zoneResolved, active, stored] = await Promise.all([
+          resolveA(site.probeHost, c.resolvers, fetcher),
+          reserve.isActive(),
+          state.get(lastKey),
+        ]);
+        const zoneIps = await watchedIps(state, `${site.id}:seenIps`, site.seedIps ?? [], zoneResolved, now, memory);
+        const zoneBlockedBy = blockingIsps(lists, zoneIps);
+        let lastBlockedAt = stored ? Number(stored) : null;
+        // Reserve active with no record (activated by hand): count from now.
+        if (lists.fresh && (zoneBlockedBy.length > 0 || (active && lastBlockedAt === null))) {
+          lastBlockedAt = now;
+          await state.put(lastKey, String(now));
+        } else if (!active && lastBlockedAt !== null) {
+          // With the reserve off the date means nothing, and a later manual activation would be undone at once.
+          lastBlockedAt = null;
+          await state.delete(lastKey);
+        }
+
+        const decision = decide(
+          { now, listsFresh: lists.fresh, zoneBlockedBy, reserveBlockedBy, reserveActive: active, reserveHealthy: healthy, lastBlockedAt },
+          { releaseAfterMs: c.timing.releaseAfterMs, reasons: st.reason },
+        );
+        log({ site: site.id, mode, zoneResolved, reserveResolved, active, healthy, ...decision });
+
+        const details = st.body.details({ reason: decision.reason, zoneIps, reserveIps, mode, runbook: deps.runbook });
+        const withDetails = (text: string) => `${text}\n\n${details}`;
+
+        // Problems are about the lists or the reserve, shared by every site: one alert, not one per site.
+        if (decision.alert) {
+          const alert = decision.alert;
+          await once(alert, () => notify(subject(mode, messages.subject.problem), withDetails(st.alert[alert])));
+        }
+
+        const act = async (kind: 'activated' | 'deactivated', run: () => Promise<void>) => {
+          if (mode === 'auto') {
+            await run();
+            report(kind, mode, site.id, withDetails(st.body[kind]));
+          } else {
+            // Observed, nothing changes and the same decision repeats every run.
+            await once(`observe:${site.id}:${kind}`, async () => report(kind, mode, site.id, withDetails(st.body[kind])));
+          }
+        };
+        if (decision.action === 'activate') {
+          await act('activated', () => reserve.activate());
+        } else if (decision.action === 'deactivate') {
+          await act('deactivated', async () => {
+            await reserve.deactivate();
+            // The next activation, automatic or manual, counts from zero.
+            await state.delete(lastKey);
+          });
+        } else if (!active && mode === 'auto') {
+          const changes = await reserve.maintain(st.change);
+          if (changes.length > 0) {
+            log({ site: site.id, maintenance: changes });
+            // Something that does not stay fixed would mail every run.
+            await once(`maintenance:${site.id}:${hash(changes.join('|'))}`, async () =>
+              report('maintenance', mode, site.id, withDetails(changes.join('\n'))),
+            );
+          }
+        }
+        return decision;
       }
 
-      if (decision.action === 'activate') {
-        if (mode === 'auto') await reserve.activate();
-        await notifyAction(subject(t.subject.activated), withDetails(t.body.activated));
-      } else if (decision.action === 'deactivate') {
-        if (mode === 'auto') {
-          await reserve.deactivate();
-          // The next activation, automatic or manual, counts from zero.
-          await state.delete(LAST_BLOCKED);
-        }
-        await notifyAction(subject(t.subject.deactivated), withDetails(t.body.deactivated));
-      } else if (!active && mode === 'auto') {
-        const changes = await reserve.maintain(t.change);
-        if (changes.length > 0) {
-          log({ maintenance: changes });
-          await notify(subject(t.subject.maintenance), withDetails(changes.join('\n')));
+      const outcomes: SiteOutcome[] = [];
+      for (const site of c.sites) {
+        try {
+          outcomes.push({ site: site.id, decision: await runSite(site) });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          log({ site: site.id, error: message });
+          outcomes.push({ site: site.id, error: message });
         }
       }
 
-      return decision;
+      for (const e of events.values()) {
+        await notify(subject(e.mode, `${messages.subject[e.kind]} (${e.sites.join(', ')})`), e.bodies.join('\n\n---\n\n'));
+      }
+      const failed = outcomes.filter((o) => o.error);
+      if (failed.length > 0) throw new Error(failed.map((o) => `${o.site}: ${o.error}`).join('\n'));
+      return outcomes;
     },
   };
 }

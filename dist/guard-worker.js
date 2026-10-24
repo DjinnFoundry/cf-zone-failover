@@ -1,11 +1,24 @@
 import { EmailMessage } from 'cloudflare:email';
 import { cfApi } from './cloudflare.js';
+import { envId } from './config.js';
 import { buildRawEmail } from './email.js';
 import { createGuard } from './guard.js';
+function envToken(env, ...names) {
+    for (const name of names) {
+        const value = env[name];
+        if (typeof value === 'string' && value)
+            return value;
+    }
+    throw new Error(`no Cloudflare token: set ${names.join(' or ')}`);
+}
+const DEFAULT_TOKENS = {
+    reserve: (env) => envToken(env, 'CF_TOKEN_RESERVE', 'CF_TOKEN'),
+    site: (env, site) => envToken(env, `CF_TOKEN_${envId(site.id)}`, 'CF_TOKEN'),
+};
 /** A ready-made scheduled Worker: runs the guard, mails the alerts, and reports three failed runs in a row. */
 export function createGuardWorker(config, options) {
     const guard = createGuard(config, options.label);
-    const tokens = options.tokens ?? ((env) => ({ primary: String(env.CF_TOKEN_PRIMARY), reserve: String(env.CF_TOKEN_RESERVE) }));
+    const tokens = options.tokens ?? DEFAULT_TOKENS;
     return {
         async scheduled(_controller, env) {
             const notify = async (subject, body) => {
@@ -22,10 +35,9 @@ export function createGuardWorker(config, options) {
                     await env.ALERT_EMAIL.send(new EmailMessage(env.ALERT_FROM, to, raw));
                 }
             };
-            const { primary, reserve } = tokens(env);
             try {
                 await guard.run({
-                    apis: { primary: cfApi(primary), reserve: cfApi(reserve) },
+                    apis: { reserve: cfApi(tokens.reserve(env)), site: (site) => cfApi(tokens.site(env, site)) },
                     state: env.STATE,
                     notify,
                     log: (entry) => console.log(JSON.stringify(entry)),

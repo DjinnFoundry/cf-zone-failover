@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createGuardWorker, type GuardEnv } from '../src/guard-worker.js';
-import { CONFIG, NOW, ZONE_IPS } from './fixtures.js';
+import { CONFIG, DOCS, NOW, SHOP, ZONE_IPS } from './fixtures.js';
 
 function kv(initial: Record<string, string> = {}) {
   const data = new Map(Object.entries(initial));
@@ -44,7 +44,8 @@ function env(state = kv()) {
     ALERT_FROM: 'guard@example.com',
     ALERT_TO: 'a@example.com, b@example.com',
     GUARD_MODE: 'observe',
-    CF_TOKEN_PRIMARY: 'p',
+    CF_TOKEN: 'shared',
+    CF_TOKEN_SHOP: 'shop-token',
     CF_TOKEN_RESERVE: 'r',
   };
   return { e, sent, state };
@@ -63,7 +64,7 @@ describe('createGuardWorker', () => {
   });
   const controller = {} as ScheduledController;
 
-  it('mails each recipient and sends the Cloudflare tokens', async () => {
+  it('mails each recipient and signs each site with its token', async () => {
     vi.useFakeTimers({ now: NOW, toFake: ['Date'] });
     vi.spyOn(console, 'log').mockImplementation(() => {});
     stubInternet({ blocked: ZONE_IPS });
@@ -73,11 +74,13 @@ describe('createGuardWorker', () => {
     await worker.scheduled(controller, e);
 
     expect(sent.map((m) => m.to)).toEqual(['a@example.com', 'b@example.com']);
-    expect(decodeSubject(sent[0]!.raw)).toBe('[observe] Guard: reserve ACTIVATED');
-    const authorizations = (vi.mocked(fetch).mock.calls as [string, RequestInit][])
-      .filter(([url]) => String(url).startsWith('https://api.cloudflare.com/'))
-      .map(([, init]) => (init.headers as Record<string, string>).authorization);
-    expect(new Set(authorizations)).toEqual(new Set(['Bearer p']));
+    expect(decodeSubject(sent[0]!.raw)).toBe('[observe] Guard: reserve ACTIVATED (shop)');
+    const auth = (zone: string) =>
+      (vi.mocked(fetch).mock.calls as [string, RequestInit][])
+        .filter(([url]) => String(url).includes(`/zones/${zone}/dns_records`))
+        .map(([, init]) => (init.headers as Record<string, string>).authorization);
+    expect(new Set(auth(SHOP.zoneId))).toEqual(new Set(['Bearer shop-token']));
+    expect(new Set(auth(DOCS.zoneId))).toEqual(new Set(['Bearer shared']));
   });
 
   it('reports only the third failed run in a row, and clears the count on success', async () => {
@@ -100,11 +103,23 @@ describe('createGuardWorker', () => {
     stubInternet();
     const { e } = env();
     e.MY_PRIMARY = 'mine';
-    const worker = createGuardWorker(CONFIG, { label: 'Guard', tokens: (env) => ({ primary: String(env.MY_PRIMARY), reserve: 'x' }) });
+    const worker = createGuardWorker(CONFIG, { label: 'Guard', tokens: { reserve: () => 'x', site: (env) => String(env.MY_PRIMARY) } });
 
     await worker.scheduled(controller, e);
 
     const auth = (vi.mocked(fetch).mock.calls as [string, RequestInit][]).find(([url]) => String(url).includes('/dns_records'))![1];
     expect((auth.headers as Record<string, string>).authorization).toBe('Bearer mine');
+  });
+
+  it('without a token for a site it fails that site and says which variable to set', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    stubInternet();
+    const { e } = env();
+    delete e.CF_TOKEN;
+
+    await expect(createGuardWorker(CONFIG, { label: 'Guard' }).scheduled(controller, e)).rejects.toThrow(
+      /docs: no Cloudflare token: set CF_TOKEN_DOCS or CF_TOKEN/,
+    );
   });
 });

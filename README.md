@@ -1,85 +1,110 @@
 # cf-zone-failover
 
-Keep a site on Cloudflare Workers reachable when ISPs block the IPs your zone is served from.
+Keep sites on Cloudflare reachable when ISPs block the IPs their zones are served from.
 
 Since February 2025 the main Spanish ISPs (Movistar, Orange, Vodafone, DIGI, Masmovil) block, during LaLiga football matches, the Cloudflare IPs that LaLiga reports as carrying pirated streams. Those are shared IPs. Thousands of unrelated sites go dark on match days, with no error page, for every customer of those ISPs. Cloudflare does not reassign a zone's IPs on any plan, new zones land in the same ranges, and a Worker has no origin server you could expose instead.
 
-This package is what [ZetaRead](https://zetaread.com) built to get through it ([write-up](https://dgilperez.com/writing/cloudflare-workers-laliga-blocks)). It has two parts:
+This package is what [ZetaRead](https://zetaread.com) built to get through it ([write-up](https://dgilperez.com/writing/cloudflare-workers-laliga-blocks)), and now covers several sites from one reserve zone. It has two parts:
 
-- **A signed reserve proxy.** A second zone, served from other IPs, holds your public hostnames as Cloudflare for SaaS custom hostnames. Its Worker forwards each request, signed, to a Custom Domain of your main Worker. The origin checks the signature and rewrites the request to its public host, so the app does not notice.
-- **A guard.** A cron Worker reads per-ISP blocklists ([hayahora.futbol](https://hayahora.futbol) by default), and when one of your IPs is blocked it points your public hostnames at the reserve. When the block is over it points them back. Between blocks it keeps the reserve's custom hostnames and certificates valid, and it mails you each time it acts or cannot.
+- **A reserve proxy.** A second zone, served from other IPs, holds your public hostnames as Cloudflare for SaaS custom hostnames. Its Worker serves each one from a target in the original zone that never moves: a second Custom Domain of a Worker (signed hand-off), the `pages.dev` name of a Pages project, or an origin record of a tunnel or server.
+- **A guard.** A cron Worker reads per-ISP blocklists ([hayahora.futbol](https://hayahora.futbol) by default) and decides per zone. When one of a zone's IPs is blocked it points that site's public hostnames at the reserve, and back when the block is over. Between blocks it keeps everything the reserve needs in place, and it mails you each time it acts or cannot.
 
 ```
 Normal
-  browser ──► example.com (zone IPs) ──► main Worker
+  browser ──► example.com (zone IPs) ──► Worker / Pages / tunnel
 
 During a block
   browser ──► example.com  CNAME, DNS only ─► fallback.reserve.example (other IPs)
                                                │  custom hostname of the reserve zone
                                                ▼
                                          reserve proxy Worker
-                                               │  signed fetch, from inside Cloudflare
+                                               │  fetch from inside Cloudflare
                                                ▼
-                                         origin.example.com ──► main Worker
-                                                               (undoes the hand-off)
+                       origin.example.com (Worker, signed) │ example-docs.pages.dev │ origin record
 ```
 
-Status: ZetaRead runs it in production. The reserve has been through a real block, switched by hand; the guard has passed a full rehearsal outside a match but not yet a real block. Read [What it does not do](#what-it-does-not-do) before you rely on it.
+Status: ZetaRead runs it in production, and the guard switched it on its own in a real block (October 2026). Read [What it does not do](#what-it-does-not-do) before you rely on it.
 
 ## Requirements
 
-- Your site is a Cloudflare Worker served through **Custom Domains** on a zone (the *primary zone*).
-- A **second zone** whose IPs are not blocked (the *reserve zone*). It can be in another account. Check it in the blocklist history first: a recently created zone is likely to share your zone's ranges.
+- Your sites are on Cloudflare zones, served by Workers Custom Domains, Pages custom domains or proxied records (tunnels, servers).
+- A **reserve zone** whose IPs are not blocked. It can be in another account. Check it in the blocklist history first: a recently created zone is likely to share the blocked ranges.
 - **Cloudflare for SaaS** on the reserve zone (custom hostnames; the first 100 are free).
 - Workers KV and, for the alerts, **Email Routing** with verified destinations on a zone you own.
 
 ## Install
 
 ```bash
-pnpm add github:DjinnFoundry/cf-zone-failover#v0.1.0
+pnpm add github:DjinnFoundry/cf-zone-failover#v0.2.0
 ```
 
 The compiled JavaScript is committed in `dist/`, so no build step runs on install.
 
 ## Use
 
-### 1. Shared configuration
+### 1. One configuration for every site
 
 ```ts
 // failover.config.ts
-import { createSigning, type GuardConfig } from 'cf-zone-failover';
+import type { FailoverConfig } from 'cf-zone-failover';
 
-export const signing = createSigning({
-  originHost: 'origin.example.com',
-  publicHosts: ['example.com', 'www.example.com'],
-  // A permanent hostname through the reserve, used as its health check.
-  testHostPattern: /^reserve-check\.example\.com$/,
-});
-
-export const guardConfig: GuardConfig = {
-  primary: {
-    accountId: '<primary account id>',
-    zoneId: '<primary zone id>',
-    worker: 'my-site',
-    publicHosts: ['example.com', 'www.example.com'],
-    probeHost: 'origin.example.com',
-  },
+export const config: FailoverConfig = {
   reserve: {
     zoneId: '<reserve zone id>',
     fallbackHost: 'fallback.reserve.example',
+    // A permanent hostname through the reserve: a 200 proves the chain.
     healthUrl: 'https://reserve-check.example.com/',
+    seedIps: ['<reserve ip>', '<reserve ip>'],
   },
-  // What the blocked country sees for your zone: see "Seed IPs" below.
-  seedIps: { zone: ['<zone ip>', '<zone ip>'], reserve: ['<reserve ip>', '<reserve ip>'] },
+  sites: [
+    {
+      id: 'shop',
+      accountId: '<account id>',
+      zoneId: '<zone id>',
+      hosts: [
+        { name: 'example.com', via: 'worker', worker: 'shop', origin: 'origin.example.com' },
+        { name: 'www.example.com', via: 'worker', worker: 'shop', origin: 'origin.example.com' },
+      ],
+      probeHost: 'origin.example.com',
+      testHostPattern: /^reserve-check\.example\.com$/,
+      // What the blocked country sees for this zone: see "Seed IPs" below.
+      seedIps: ['<zone ip>', '<zone ip>'],
+    },
+    {
+      id: 'docs',
+      accountId: '<account id>',
+      zoneId: '<zone id>',
+      hosts: [
+        { name: 'example.org', via: 'pages', project: 'example-docs' },
+        { name: 'app.example.org', via: 'origin', origin: 'origin-app.example.org' },
+      ],
+      probeHost: 'origin-app.example.org',
+    },
+  ],
   locale: 'en', // or 'es'
 };
 ```
 
-### 2. The origin: undo the hand-off first
+How each kind of host is reached during a block:
+
+| `via` | Served normally by | The proxy fetches | You add |
+| --- | --- | --- | --- |
+| `worker` | a Worker Custom Domain | `origin`, another Custom Domain of the same Worker, signed | `fromFallbackProxy` in the Worker (step 2) |
+| `pages` | a Pages custom domain | `<project>.pages.dev` | nothing |
+| `origin` | a proxied record (tunnel, server) | `origin`, a proxied record with the same target | the backend must answer to `origin` (for a tunnel, an ingress rule with `httpHostHeader` set to the public name) |
+
+The guard creates the Worker origins, the origin records (copied from the public one) and the probes that are missing, so adding a site is a config entry and a deploy.
+
+### 2. Worker hosts: undo the hand-off first
 
 ```ts
-// main Worker
-import { signing } from './failover.config';
+// in the Worker that serves example.com
+import { createSigning } from 'cf-zone-failover';
+
+const signing = createSigning({
+  originHost: 'origin.example.com',
+  publicHosts: ['example.com', 'www.example.com'],
+});
 
 export default {
   async fetch(incoming: Request, env: Env, ctx: ExecutionContext) {
@@ -91,26 +116,28 @@ export default {
 };
 ```
 
-`fromFallbackProxy` rewrites the URL **and the `Host` header**. Frameworks such as OpenNext build the request URL from `Host`; left as the origin's, every middleware rewrite looks external and the Worker fetches itself over the internet.
+`fromFallbackProxy` rewrites the URL **and the `Host` header**, and restores the visitor's IP in `cf-connecting-ip`. Frameworks such as OpenNext build the request URL from `Host`; left as the origin's, every middleware rewrite looks external and the Worker fetches itself over the internet.
+
+Pages and origin hosts get no signature: they see the request under their own name, with `x-forwarded-host` set to the public one. The proxy rewrites absolute redirects back to the public name and drops the `x-robots-tag: noindex` that `pages.dev` adds.
 
 ### 3. The reserve proxy Worker
 
 ```ts
-import { createFallbackProxy } from 'cf-zone-failover';
-import { signing } from './failover.config';
+import { createFailoverProxy } from 'cf-zone-failover';
+import { config } from './failover.config';
 
-export default createFallbackProxy(signing);
+export default createFailoverProxy(config);
 ```
 
-Route it on the reserve zone with `*/*` and `fallback.reserve.example/*`. It needs the secret `FALLBACK_PROXY_SECRET`, the same value as in the main Worker.
+Route it on the reserve zone with `*/*` and `fallback.reserve.example/*`. Each site with Worker hosts needs its secret, `FALLBACK_SECRET_<ID>` (`FALLBACK_SECRET_SHOP` above, or the site's `secretEnv`), the same value as in its Worker.
 
 ### 4. The guard Worker
 
 ```ts
 import { createGuardWorker } from 'cf-zone-failover/guard-worker';
-import { guardConfig } from './failover.config';
+import { config } from './failover.config';
 
-export default createGuardWorker(guardConfig, { label: 'Failover guard', runbook: 'https://…' });
+export default createGuardWorker(config, { label: 'Failover guard', runbook: 'https://…' });
 ```
 
 A minimal `wrangler.jsonc` is in [`examples/guard.wrangler.jsonc`](examples/guard.wrangler.jsonc). The guard needs:
@@ -121,28 +148,28 @@ A minimal `wrangler.jsonc` is in [`examples/guard.wrangler.jsonc`](examples/guar
 | `ALERT_EMAIL` | `send_email` binding, destinations verified in Email Routing |
 | `ALERT_FROM`, `ALERT_TO` | sender on a zone with Email Routing; comma-separated recipients |
 | `GUARD_MODE` | `auto` acts; anything else only decides and mails, prefixed `[observe]` |
-| `CF_TOKEN_PRIMARY` | Workers Scripts Write on the primary account; DNS Write, Workers Routes Write and Zone Read on the primary zone |
-| `CF_TOKEN_RESERVE` | SSL and Certificates Write and Zone Read on the reserve zone |
+| `CF_TOKEN_<ID>` or `CF_TOKEN` | per site: DNS Write and Zone Read on its zone; Workers Scripts Write on its account if it has Worker hosts; Pages Write if it has Pages hosts |
+| `CF_TOKEN_RESERVE` or `CF_TOKEN` | SSL and Certificates Write and Zone Read on the reserve zone |
 
-Start in `observe` for a match day or two, then switch to `auto`.
+A site with `observe: true` is only watched, whatever `GUARD_MODE` says: use it for a new site's first match days.
 
 The step-by-step setup (reserve zone, custom hostnames, validation records, tokens) is in [docs/setup.md](docs/setup.md).
 
 ## How the guard decides
 
-Every run (a cron of `*/2 * * * *` works well):
+Every run (a cron of `*/2 * * * *` works well), for each site:
 
-1. Reads every ISP list. If any is older than 30 minutes or unreadable, it decides nothing and alerts once.
-2. Watches the union of the seed IPs, what the zone resolves to now over DoH, and what it resolved to in the last 24 h.
-3. **Activates** as soon as one watched IP is blocked by any ISP, if the reserve health URL answers 200 and the reserve IPs are not blocked. If activation fails halfway it reattaches the Custom Domains.
+1. Reads every ISP list once. If any is older than 30 minutes or unreadable, it decides nothing and alerts once.
+2. Watches the union of the site's seed IPs, what its probe resolves to now over DoH, and what it resolved to in the last 24 h.
+3. **Activates** as soon as one watched IP is blocked by any ISP, if the reserve health URL answers 200 and the reserve IPs are not blocked. If activation fails halfway it puts every name back.
 4. **Goes back** after 30 minutes without a block on any ISP (blocks stop and resume within a match), or at once if the reserve is the one blocked.
-5. Outside a block, **maintains the reserve**: reactivates custom hostnames in `moved` (Cloudflare deletes them after 7 days otherwise), recreates missing ones, and puts the validation TXT records Cloudflare asks for in the primary zone.
+5. Outside a block, **maintains the site**: puts back any public name that is not served from its zone, creates missing Worker origins, origin records and probes, retries Pages domains that lost validation, reactivates custom hostnames in `moved` (Cloudflare deletes them after 7 days otherwise), recreates missing ones, and puts the validation TXT records Cloudflare asks for in the site's zone.
 
-Every action and every problem is mailed; a repeated problem at most once every 6 hours; three failed runs in a row too. All the timings are configurable.
+One site failing does not stop the others. Every run sends at most one mail per kind of action, listing the sites; a repeated problem goes out at most once every 6 hours; three failed runs in a row too. All the timings are configurable.
 
 ## Seed IPs
 
-Cloudflare answers a zone's A records according to where the resolver is, and ignores `edns_client_subnet`. The cron does not run in the blocked country, so it cannot see by itself which IPs that country gets. Put them in `seedIps`, checked from a line in that country:
+Cloudflare answers a zone's A records according to where the resolver is, and ignores `edns_client_subnet`. The cron does not run in the blocked country, so it cannot see by itself which IPs that country gets. Put them in each site's `seedIps`, checked from a line in that country:
 
 ```bash
 dig +short example.com A @1.1.1.1
@@ -154,8 +181,9 @@ and add any new pair you see later. The guard adds what it resolves, but that is
 ## What it does not do
 
 - **It notices a block only when the blocklist does.** hayahora.futbol refreshes every few minutes; add the cron interval and DNS propagation (TTL 60) on top.
-- **It does not redeploy your Worker.** A deploy while the reserve is active fails, because it tries to recreate Custom Domains on names that now have a CNAME. Do not deploy until the guard reports the way back, and retry any deploy that failed meanwhile.
-- **It does not cover IPv6-only or ISP-level DNS blocking**, only IP blocks on the primary zone.
+- **It does not redeploy your Workers.** A deploy of a Worker whose Custom Domains moved fails while the reserve is active. Do not deploy until the guard reports the way back, and retry any deploy that failed meanwhile.
+- **Pages and origin hosts lose the visitor's IP**: the backend sees the proxy's. Rate limits and logs by IP lump every visitor together during a block.
+- **It does not cover IPv6-only or ISP-level DNS blocking**, only IP blocks on the sites' zones.
 - **It cannot help if the reserve zone gets blocked too.** It alerts and leaves the decision to you.
 - **The handover drops in-flight requests** for a few seconds while DNS changes.
 

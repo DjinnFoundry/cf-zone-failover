@@ -1,6 +1,6 @@
 import { EmailMessage } from 'cloudflare:email';
 import { cfApi } from './cloudflare.js';
-import type { GuardConfig } from './config.js';
+import { envId, type FailoverConfig, type SiteConfig } from './config.js';
 import { buildRawEmail } from './email.js';
 import { createGuard } from './guard.js';
 
@@ -21,19 +21,30 @@ export interface GuardWorkerOptions<E extends GuardEnv> {
   /** Prefix of every alert subject, e.g. "Failover guard". */
   label: string;
   /**
-   * The two Cloudflare API tokens. Default: env.CF_TOKEN_PRIMARY (DNS and
-   * Workers routes of the primary zone, Workers Scripts of its account) and
-   * env.CF_TOKEN_RESERVE (SSL and Certificates of the reserve zone).
+   * Cloudflare API tokens. Default: `CF_TOKEN_RESERVE` for the reserve zone and
+   * `CF_TOKEN_<SITE ID>` for each site, both falling back to `CF_TOKEN`.
    */
-  tokens?: (env: E) => { primary: string; reserve: string };
+  tokens?: { reserve: (env: E) => string; site: (env: E, site: SiteConfig) => string };
   runbook?: string;
 }
 
+function envToken(env: GuardEnv, ...names: string[]): string {
+  for (const name of names) {
+    const value = env[name];
+    if (typeof value === 'string' && value) return value;
+  }
+  throw new Error(`no Cloudflare token: set ${names.join(' or ')}`);
+}
+
+const DEFAULT_TOKENS = {
+  reserve: (env: GuardEnv) => envToken(env, 'CF_TOKEN_RESERVE', 'CF_TOKEN'),
+  site: (env: GuardEnv, site: SiteConfig) => envToken(env, `CF_TOKEN_${envId(site.id)}`, 'CF_TOKEN'),
+};
+
 /** A ready-made scheduled Worker: runs the guard, mails the alerts, and reports three failed runs in a row. */
-export function createGuardWorker<E extends GuardEnv>(config: GuardConfig, options: GuardWorkerOptions<E>) {
+export function createGuardWorker<E extends GuardEnv>(config: FailoverConfig, options: GuardWorkerOptions<E>) {
   const guard = createGuard(config, options.label);
-  const tokens =
-    options.tokens ?? ((env: E) => ({ primary: String(env.CF_TOKEN_PRIMARY), reserve: String(env.CF_TOKEN_RESERVE) }));
+  const tokens = options.tokens ?? DEFAULT_TOKENS;
 
   return {
     async scheduled(_controller: ScheduledController, env: E): Promise<void> {
@@ -51,10 +62,9 @@ export function createGuardWorker<E extends GuardEnv>(config: GuardConfig, optio
           await env.ALERT_EMAIL.send(new EmailMessage(env.ALERT_FROM, to, raw));
         }
       };
-      const { primary, reserve } = tokens(env);
       try {
         await guard.run({
-          apis: { primary: cfApi(primary), reserve: cfApi(reserve) },
+          apis: { reserve: cfApi(tokens.reserve(env)), site: (site) => cfApi(tokens.site(env, site)) },
           state: env.STATE,
           notify,
           log: (entry) => console.log(JSON.stringify(entry)),

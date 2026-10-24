@@ -49,7 +49,7 @@ export interface Signing {
 }
 
 /** `duplex` is required by undici (tests) for streamed bodies; Workers ignores it. */
-type StreamingRequestInit = RequestInit & { duplex?: 'half' };
+export type StreamingRequestInit = RequestInit & { duplex?: 'half' };
 
 const notFound = () => new Response('Not Found', { status: 404 });
 

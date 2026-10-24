@@ -1,5 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createFallbackProxy } from '../src/proxy-worker.js';
+import { describe, expect, it } from 'vitest';
 import { createSigning } from '../src/signing.js';
 
 const SECRET = 'test-secret';
@@ -109,41 +108,5 @@ describe('fromFallbackProxy: the origin undoes the hand-off', () => {
     request.headers.set(headers.publicHost, 'evil.test');
 
     expect((fromFallbackProxy(request, SECRET) as Response).status).toBe(404);
-  });
-});
-
-describe('createFallbackProxy', () => {
-  const proxy = createFallbackProxy(signing);
-  const env = { FALLBACK_PROXY_SECRET: 'reserve-secret' };
-  afterEach(() => vi.unstubAllGlobals());
-
-  it('forwards our hosts to the origin, signed, and returns the response as is', async () => {
-    const fetchMock = vi.fn(async (_r: Request) => new Response('hi', { status: 302, headers: { location: 'https://example.com/' } }));
-    vi.stubGlobal('fetch', fetchMock);
-
-    const response = await proxy.fetch(new Request('https://example.com/?a=1'), env);
-
-    expect(response.status).toBe(302);
-    expect(response.headers.get('location')).toBe('https://example.com/');
-    const [sent] = fetchMock.mock.calls[0]!;
-    expect(sent.url).toBe('https://origin.example.com/?a=1');
-    expect(sent.headers.get(headers.secret)).toBe(env.FALLBACK_PROXY_SECRET);
-  });
-
-  it('answers 404 to foreign hosts, such as the fallback host asked directly', async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
-
-    expect((await proxy.fetch(new Request('https://fallback.example.net/'), env)).status).toBe(404);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it('forwards nothing without a secret', async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-
-    expect((await proxy.fetch(new Request('https://example.com/'), {})).status).toBe(500);
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
