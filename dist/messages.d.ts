@@ -51,6 +51,7 @@ export interface Messages {
         restored: (host: string) => string;
         targetCreated: (name: string) => string;
         pagesRevalidated: (host: string, status: string) => string;
+        movedToReserve: (host: string, fallbackHost: string) => string;
     };
 }
 export declare const LOCALES: Record<Locale, (c: MessageContext) => Messages>;

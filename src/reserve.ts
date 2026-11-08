@@ -27,7 +27,7 @@ interface CustomHostname {
   id: string;
   hostname: string;
   status: string;
-  ssl?: { validation_records?: { txt_name?: string; txt_value?: string }[] };
+  ssl?: { status?: string; validation_records?: { txt_name?: string; txt_value?: string }[] };
   ownership_verification?: { type?: string; name?: string; value?: string };
 }
 interface PagesDomain {
@@ -64,6 +64,16 @@ export interface Reserve {
    *   ones with the marker are gone.
    */
   maintain(changes: Messages['change']): Promise<string[]>;
+  /**
+   * With the reserve active, brings in the public hostnames still served
+   * from the zone (added to the config during a block) and returns what
+   * changed: each gets its custom hostname on the reserve and the validation
+   * TXT records, and moves to the reserve once both the hostname and its
+   * certificate are active. Hosts already moved are never touched. Reuses the
+   * records `isActive` read on this instance, so with nothing left out it
+   * makes no call. If a move fails, that host goes back to its zone.
+   */
+  catchUp(changes: Messages['change']): Promise<string[]>;
 }
 
 export function createReserve(apis: SiteApis, site: SiteConfig, config: Pick<ResolvedConfig, 'reserve' | 'dns'>): Reserve {
@@ -78,6 +88,8 @@ export function createReserve(apis: SiteApis, site: SiteConfig, config: Pick<Res
   const hasWorkers = site.hosts.some((h) => h.via === 'worker');
 
   const zoneRecords = () => apis.zone<DnsRecord[]>('GET', `${records}?per_page=1000`);
+  /** What the last `isActive` read, for `catchUp` in the same run; used once. */
+  let lastRead: DnsRecord[] | undefined;
   const domains = async () => (hasWorkers ? apis.zone<WorkerDomain[]>('GET', workerDomains) : []);
   const isReserveCname = (r: DnsRecord) => r.type === 'CNAME' && names.has(r.name) && r.content === fallback;
   /** Records that serve a name from the zone, not from the reserve. */
@@ -90,10 +102,10 @@ export function createReserve(apis: SiteApis, site: SiteConfig, config: Pick<Res
     apis.zone('POST', records, { type: r.type, name, content: r.content, proxied: true, ttl: 1, ...(comment ? { comment } : {}) });
   const deleteRecord = (r: DnsRecord) => apis.zone('DELETE', `${records}/${r.id}`);
 
-  /** Puts back every public hostname that is not served from the zone; returns which. */
-  async function servePrimary(all: DnsRecord[], attached: WorkerDomain[]): Promise<string[]> {
+  /** Puts back every public hostname (or these) that is not served from the zone; returns which. */
+  async function servePrimary(all: DnsRecord[], attached: WorkerDomain[], hosts = site.hosts): Promise<string[]> {
     const restored: string[] = [];
-    for (const host of site.hosts) {
+    for (const host of hosts) {
       if (host.via === 'worker') {
         if (attached.some((d) => d.hostname === host.name)) continue;
         await attachDomain(host.name, host.worker);
@@ -107,6 +119,16 @@ export function createReserve(apis: SiteApis, site: SiteConfig, config: Pick<Res
       restored.push(host.name);
     }
     return restored;
+  }
+
+  /** Takes a public hostname off its zone and points it at the reserve. */
+  async function moveHost(host: HostConfig, all: DnsRecord[], attached: WorkerDomain[]) {
+    if (host.via === 'worker') {
+      for (const d of attached.filter((d) => d.hostname === host.name)) await apis.zone('DELETE', `${workerDomains}/${d.id}`);
+    } else {
+      for (const r of servingRecords(all, host.name)) await deleteRecord(r);
+    }
+    await apis.zone('POST', records, { type: 'CNAME', name: host.name, content: fallback, proxied: false, ttl: 60, comment: dns.cnameComment });
   }
 
   async function restore(): Promise<string[]> {
@@ -162,11 +184,16 @@ export function createReserve(apis: SiteApis, site: SiteConfig, config: Pick<Res
     }
   }
 
-  async function ensureCustomHostnames(all: DnsRecord[], say: Messages['change']): Promise<string[]> {
+  /** Each of these hosts as a custom hostname of the reserve, with its validation TXT records in the zone. */
+  async function ensureCustomHostnames(
+    all: DnsRecord[],
+    say: Messages['change'],
+    hosts = site.hosts,
+  ): Promise<{ changes: string[]; hostnames: CustomHostname[] }> {
     const changes: string[] = [];
     const existing = await reserveHostnames();
     const hostnames: CustomHostname[] = [];
-    for (const { name } of site.hosts) {
+    for (const { name } of hosts) {
       let h = existing.find((x) => x.hostname === name);
       if (!h) {
         h = await apis.reserve<CustomHostname>('POST', customHostnames, { hostname: name, ...SSL_TXT });
@@ -205,32 +232,19 @@ export function createReserve(apis: SiteApis, site: SiteConfig, config: Pick<Res
         }
       }
     }
-    return changes;
+    return { changes, hostnames };
   }
 
   return {
     async isActive() {
-      return (await zoneRecords()).some(isReserveCname);
+      lastRead = await zoneRecords();
+      return lastRead.some(isReserveCname);
     },
 
     async activate() {
       const [all, attached] = await Promise.all([zoneRecords(), domains()]);
       try {
-        for (const host of site.hosts) {
-          if (host.via === 'worker') {
-            for (const d of attached.filter((d) => d.hostname === host.name)) await apis.zone('DELETE', `${workerDomains}/${d.id}`);
-          } else {
-            for (const r of servingRecords(all, host.name)) await deleteRecord(r);
-          }
-          await apis.zone('POST', records, {
-            type: 'CNAME',
-            name: host.name,
-            content: fallback,
-            proxied: false,
-            ttl: 60,
-            comment: dns.cnameComment,
-          });
-        }
+        for (const host of site.hosts) await moveHost(host, all, attached);
       } catch (error) {
         await restore();
         throw error;
@@ -250,8 +264,35 @@ export function createReserve(apis: SiteApis, site: SiteConfig, config: Pick<Res
         ...restored,
         ...(await ensureTargets(fresh, freshDomains, say)),
         ...(await revalidatePages(say)),
-        ...(await ensureCustomHostnames(fresh, say)),
+        ...(await ensureCustomHostnames(fresh, say)).changes,
       ];
+    },
+
+    async catchUp(say) {
+      const all = lastRead ?? (await zoneRecords());
+      lastRead = undefined;
+      const moved = new Set(all.filter(isReserveCname).map((r) => r.name));
+      const left = site.hosts.filter((h) => !moved.has(h.name));
+      if (moved.size === 0 || left.length === 0) return [];
+
+      const { changes, hostnames } = await ensureCustomHostnames(all, say, left);
+      const ready = left.filter((host) => {
+        const h = hostnames.find((x) => x.hostname === host.name);
+        return h?.status === 'active' && h.ssl?.status === 'active';
+      });
+      const attached = ready.some((h) => h.via === 'worker') ? await domains() : [];
+      for (const host of ready) {
+        try {
+          await moveHost(host, all, attached);
+        } catch (error) {
+          // A name with nothing is down for everyone: back to its zone. The moved ones stay.
+          const [fresh, freshDomains] = await Promise.all([zoneRecords(), domains()]);
+          await servePrimary(fresh, freshDomains, [host]);
+          throw error;
+        }
+        changes.push(say.movedToReserve(host.name, fallback));
+      }
+      return changes;
     },
   };
 }

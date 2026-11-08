@@ -172,8 +172,9 @@ export function createGuard(config: FailoverConfig, label: string) {
             // The next activation, automatic or manual, counts from zero.
             await state.delete(lastKey);
           });
-        } else if (!active && mode === 'auto') {
-          const changes = await reserve.maintain(st.change);
+        } else if (mode === 'auto') {
+          // Off: keep the site ready. On: bring in hosts added during the block.
+          const changes = active ? await reserve.catchUp(st.change) : await reserve.maintain(st.change);
           if (changes.length > 0) {
             log({ site: site.id, maintenance: changes });
             // Something that does not stay fixed would mail every run.

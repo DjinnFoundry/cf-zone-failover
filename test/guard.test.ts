@@ -209,6 +209,41 @@ describe('guard', () => {
     expect(s.subjects()).toEqual(['Guard: reserve maintenance (shop)']);
   });
 
+  it('with the reserve active it brings in a host added to the config, once its certificate is active', async () => {
+    const blog = { name: 'blog.example.org', via: 'pages', project: 'example-blog' } as const;
+    const grown = { ...DOCS, hosts: [...DOCS.hosts, blog] };
+    const s = await activated(setup({ config: { ...CONFIG, sites: [grown] } }), ['docs']);
+    s.cf.world.records.push({ id: 'blog', zone: DOCS.zoneId, type: 'CNAME', name: blog.name, content: 'example-blog.pages.dev', proxied: true });
+    const hostname = () => s.cf.world.hostnames.find((h) => h.hostname === blog.name);
+
+    expect((await s.decisions()).docs).toBe('stay');
+    expect(hostname()?.status).toBe('pending');
+    expect(cnames(s)).toEqual(['app.example.org', 'example.org']);
+
+    Object.assign(hostname()!, {
+      ssl: { status: 'pending_validation', validation_records: [{ txt_name: '_acme-challenge.blog.example.org', txt_value: 'dcv' }] },
+    });
+    await s.run();
+    expect(s.cf.world.records.filter((r) => r.type === 'TXT').map((r) => r.name)).toEqual(['_acme-challenge.blog.example.org']);
+    expect(cnames(s)).toEqual(['app.example.org', 'example.org']);
+
+    Object.assign(hostname()!, { status: 'active', ssl: { status: 'active', validation_records: [] } });
+    await s.run();
+    expect(cnames(s)).toEqual(['app.example.org', 'blog.example.org', 'example.org']);
+    expect(s.subjects()).toEqual(Array(3).fill('Guard: reserve maintenance (docs)'));
+    expect(s.notify.mock.calls[2]![1]).toMatch(/^blog\.example\.org now served from fallback\.example\.net/);
+
+    // Nothing left out: the run reads no custom hostname.
+    s.cf.world.calls = [];
+    await s.run();
+    expect(s.cf.world.calls.filter((c) => c.includes('custom_hostnames') || !c.startsWith('GET'))).toEqual([]);
+
+    await s.deps.state.put('docs:lastBlockedAt', String(NOW - RELEASE));
+    expect((await s.decisions()).docs).toBe('deactivate');
+    expect(cnames(s)).toEqual([]);
+    expect(s.cf.world.records.find((r) => r.name === blog.name)).toMatchObject({ content: 'example-blog.pages.dev', proxied: true });
+  });
+
   it('speaks Spanish when asked', async () => {
     const s = setup({ blocked: { movistar: ZONE_IPS }, config: { ...CONFIG, locale: 'es' } });
 

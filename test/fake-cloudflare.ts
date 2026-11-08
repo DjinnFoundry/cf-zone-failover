@@ -21,7 +21,7 @@ export interface FakeHostname {
   id: string;
   hostname: string;
   status: string;
-  ssl?: { validation_records?: { txt_name?: string; txt_value?: string }[] };
+  ssl?: { status?: string; validation_records?: { txt_name?: string; txt_value?: string }[] };
   ownership_verification?: { type?: string; name?: string; value?: string };
 }
 

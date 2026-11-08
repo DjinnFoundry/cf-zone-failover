@@ -164,6 +164,7 @@ Every run (a cron of `*/2 * * * *` works well), for each site:
 3. **Activates** as soon as one watched IP is blocked by any ISP, if the reserve health URL answers 200 and the reserve IPs are not blocked. If activation fails halfway it puts every name back.
 4. **Goes back** after 30 minutes without a block on any ISP (blocks stop and resume within a match), or at once if the reserve is the one blocked.
 5. Outside a block, **maintains the site**: puts back any public name that is not served from its zone, creates missing Worker origins, origin records and probes, retries Pages domains that lost validation, reactivates custom hostnames in `moved` (Cloudflare deletes them after 7 days otherwise), recreates missing ones, and puts the validation TXT records Cloudflare asks for in the site's zone.
+6. During a block, **brings in hosts added to the config meanwhile**: gives each its custom hostname and validation TXT records, and moves it to the reserve once its certificate is active. Hosts already moved are left alone, and a run with nothing left out costs no extra API call. The way back restores them with the rest.
 
 One site failing does not stop the others. Every run sends at most one mail per kind of action, listing the sites; a repeated problem goes out at most once every 6 hours; three failed runs in a row too. All the timings are configurable.
 

@@ -224,3 +224,123 @@ describe('maintain', () => {
     expect(shopTxt.map((r) => r.content).sort()).toEqual(['"new"', '"ownership"', '"zone-own-certificate"']);
   });
 });
+
+describe('catchUp: a host added while the reserve is active', () => {
+  /** SHOP as it was when the reserve went on: only its apex moved. */
+  const apexOnly: SiteConfig = { ...SHOP, hosts: [SHOP.hosts[0]!] };
+  const certified = (hostname: string, i = 0) => ({
+    id: `c${i}`,
+    hostname,
+    status: 'active',
+    ssl: { status: 'active', validation_records: [] },
+  });
+  /** SHOP active with only its apex moved; www.example.com still on its Custom Domain. */
+  async function apexMoved(hostnames: NonNullable<Parameters<typeof normalCloudflare>[0]>['hostnames']) {
+    const cf = normalCloudflare({ hostnames });
+    await reserveOf(cf, apexOnly).activate();
+    cf.world.calls = [];
+    return cf;
+  }
+
+  it('costs no call beyond the read isActive already made when no host is left out', async () => {
+    const cf = normalCloudflare();
+    const reserve = reserveOf(cf, SHOP);
+    await reserve.activate();
+    expect(await reserve.isActive()).toBe(true);
+    cf.world.calls = [];
+
+    expect(await reserve.catchUp(say)).toEqual([]);
+    expect(cf.world.calls).toEqual([]);
+  });
+
+  it('does nothing on a site whose reserve is off', async () => {
+    const cf = normalCloudflare({ hostnames: [] });
+
+    expect(await reserveOf(cf, SHOP).catchUp(say)).toEqual([]);
+    expect(cf.world.calls.filter((c) => !c.startsWith('GET'))).toEqual([]);
+    expect(cf.world.hostnames).toEqual([]);
+  });
+
+  it('creates the missing custom hostname and its TXT records, and keeps the host on its zone until the certificate is active', async () => {
+    const cf = await apexMoved([certified('example.com')]);
+
+    expect(await reserveOf(cf, SHOP).catchUp(say)).toEqual(['custom hostname www.example.com recreated']);
+    expect(domains(cf)).toEqual(['origin.example.com', 'www.example.com']);
+
+    // Cloudflare fills in the validation a moment later.
+    Object.assign(cf.world.hostnames.find((h) => h.hostname === 'www.example.com')!, {
+      ssl: { status: 'pending_validation', validation_records: [{ txt_name: '_acme-challenge.www.example.com', txt_value: 'dcv' }] },
+      ownership_verification: { type: 'txt', name: '_cf-custom-hostname.www.example.com', value: 'owner' },
+    });
+    expect(await reserveOf(cf, SHOP).catchUp(say)).toEqual([
+      'TXT _acme-challenge.www.example.com added',
+      'TXT _cf-custom-hostname.www.example.com added',
+    ]);
+    expect(await reserveOf(cf, SHOP).catchUp(say)).toEqual([]);
+    expect(cnames(cf)).toEqual(['example.com']);
+    expect(domains(cf)).toEqual(['origin.example.com', 'www.example.com']);
+  });
+
+  it('moves the host once its certificate is active, and never touches the hosts already moved', async () => {
+    const cf = await apexMoved([certified('example.com', 0), certified('www.example.com', 1)]);
+    const apexCname = cf.world.records.find((r) => r.name === 'example.com')!.id;
+
+    expect(await reserveOf(cf, SHOP).catchUp(say)).toEqual([`www.example.com now served from ${FALLBACK}`]);
+
+    expect(cnames(cf)).toEqual(['example.com', 'www.example.com']);
+    expect(domains(cf)).toEqual(['origin.example.com']);
+    expect(cf.world.records.find((r) => r.name === 'example.com')!.id).toBe(apexCname);
+    expect(served(cf, 'www.example.com')).toEqual([`CNAME ${FALLBACK} dns-only`]);
+    // Nothing else is touched: one Custom Domain off, one CNAME on.
+    expect(cf.world.calls.filter((c) => !c.startsWith('GET'))).toEqual([
+      expect.stringMatching(/^DELETE \/accounts\/account-shop\/workers\/domains\//),
+      `POST /zones/${SHOP.zoneId}/dns_records`,
+    ]);
+    expect(await reserveOf(cf, SHOP).catchUp(say)).toEqual([]);
+  });
+
+  it('needs the custom hostname active too, not only its certificate', async () => {
+    const cf = await apexMoved([certified('example.com', 0), { ...certified('www.example.com', 1), status: 'pending' }]);
+
+    expect(await reserveOf(cf, SHOP).catchUp(say)).toEqual([]);
+    expect(domains(cf)).toEqual(['origin.example.com', 'www.example.com']);
+  });
+
+  it('moves a Pages host and an origin host of a site that grew', async () => {
+    const cf = normalCloudflare({ hostnames: ['example.org', 'app.example.org'].map(certified) });
+    await reserveOf(cf, { ...DOCS, hosts: [DOCS.hosts[0]!] }).activate();
+
+    expect(await reserveOf(cf, DOCS).catchUp(say)).toEqual([`app.example.org now served from ${FALLBACK}`]);
+    expect(served(cf, 'app.example.org')).toEqual([`CNAME ${FALLBACK} dns-only`]);
+    expect(served(cf, 'origin-app.example.org')).toEqual([`CNAME ${TUNNEL} proxied`]);
+  });
+
+  it('if the CNAME fails it puts that host back on its zone and leaves the moved ones moved', async () => {
+    const cf = await apexMoved([certified('example.com', 0), certified('www.example.com', 1)]);
+    cf.world.failOn = `POST /zones/${SHOP.zoneId}/dns_records`;
+
+    await expect(reserveOf(cf, SHOP).catchUp(say)).rejects.toThrow(/simulated failure/);
+
+    expect(domains(cf)).toEqual(['origin.example.com', 'www.example.com']);
+    expect(cnames(cf)).toEqual(['example.com']);
+  });
+
+  it('after a crash between taking the host off its zone and adding the CNAME, the next run finishes the move', async () => {
+    const cf = await apexMoved([certified('example.com', 0), certified('www.example.com', 1)]);
+    cf.world.domains = cf.world.domains.filter((d) => d.hostname !== 'www.example.com');
+
+    expect(await reserveOf(cf, SHOP).catchUp(say)).toEqual([`www.example.com now served from ${FALLBACK}`]);
+    expect(cnames(cf)).toEqual(['example.com', 'www.example.com']);
+  });
+
+  it('deactivate puts a host moved this way back too', async () => {
+    const cf = await apexMoved([certified('example.com', 0), certified('www.example.com', 1)]);
+    const reserve = reserveOf(cf, SHOP);
+    await reserve.catchUp(say);
+
+    await reserve.deactivate();
+
+    expect(cnames(cf)).toEqual([]);
+    expect(domains(cf)).toEqual(['example.com', 'origin.example.com', 'www.example.com']);
+  });
+});

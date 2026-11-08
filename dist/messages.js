@@ -44,6 +44,7 @@ const en = (c) => {
             restored: (h) => `${h} was not served from the zone: put back`,
             targetCreated: (n) => `${n} created`,
             pagesRevalidated: (h, status) => `Pages domain ${h} was ${status}: validation retried`,
+            movedToReserve: (h, f) => `${h} now served from ${f}`,
         },
     };
 };
@@ -90,6 +91,7 @@ const es = (c) => {
             restored: (h) => `${h} no servía desde la zona: repuesto`,
             targetCreated: (n) => `${n} creado`,
             pagesRevalidated: (h, status) => `dominio de Pages ${h} estaba ${status}: validación relanzada`,
+            movedToReserve: (h, f) => `${h} sirve ahora desde ${f}`,
         },
     };
 };

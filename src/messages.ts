@@ -48,6 +48,7 @@ export interface Messages {
     restored: (host: string) => string;
     targetCreated: (name: string) => string;
     pagesRevalidated: (host: string, status: string) => string;
+    movedToReserve: (host: string, fallbackHost: string) => string;
   };
 }
 
@@ -103,6 +104,7 @@ const en = (c: MessageContext): Messages => {
       restored: (h) => `${h} was not served from the zone: put back`,
       targetCreated: (n) => `${n} created`,
       pagesRevalidated: (h, status) => `Pages domain ${h} was ${status}: validation retried`,
+      movedToReserve: (h, f) => `${h} now served from ${f}`,
     },
   };
 };
@@ -152,6 +154,7 @@ const es = (c: MessageContext): Messages => {
       restored: (h) => `${h} no servía desde la zona: repuesto`,
       targetCreated: (n) => `${n} creado`,
       pagesRevalidated: (h, status) => `dominio de Pages ${h} estaba ${status}: validación relanzada`,
+      movedToReserve: (h, f) => `${h} sirve ahora desde ${f}`,
     },
   };
 };

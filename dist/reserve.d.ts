@@ -32,5 +32,15 @@ export interface Reserve {
      *   ones with the marker are gone.
      */
     maintain(changes: Messages['change']): Promise<string[]>;
+    /**
+     * With the reserve active, brings in the public hostnames still served
+     * from the zone (added to the config during a block) and returns what
+     * changed: each gets its custom hostname on the reserve and the validation
+     * TXT records, and moves to the reserve once both the hostname and its
+     * certificate are active. Hosts already moved are never touched. Reuses the
+     * records `isActive` read on this instance, so with nothing left out it
+     * makes no call. If a move fails, that host goes back to its zone.
+     */
+    catchUp(changes: Messages['change']): Promise<string[]>;
 }
 export declare function createReserve(apis: SiteApis, site: SiteConfig, config: Pick<ResolvedConfig, 'reserve' | 'dns'>): Reserve;
