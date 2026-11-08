@@ -299,8 +299,16 @@ describe('catchUp: a host added while the reserve is active', () => {
     expect(await reserveOf(cf, SHOP).catchUp(say)).toEqual([]);
   });
 
-  it('needs the custom hostname active too, not only its certificate', async () => {
+  it('moves on the certificate alone: Cloudflare activates the hostname of a proxied name only once it points at the reserve', async () => {
     const cf = await apexMoved([certified('example.com', 0), { ...certified('www.example.com', 1), status: 'pending' }]);
+
+    expect(await reserveOf(cf, SHOP).catchUp(say)).toEqual([`www.example.com now served from ${FALLBACK}`]);
+    expect(cnames(cf)).toEqual(['example.com', 'www.example.com']);
+  });
+
+  it('waits while the certificate is not active', async () => {
+    const pending = { ...certified('www.example.com', 1), status: 'pending', ssl: { status: 'pending_validation' } };
+    const cf = await apexMoved([certified('example.com', 0), pending]);
 
     expect(await reserveOf(cf, SHOP).catchUp(say)).toEqual([]);
     expect(domains(cf)).toEqual(['origin.example.com', 'www.example.com']);

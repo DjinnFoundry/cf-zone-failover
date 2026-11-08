@@ -68,10 +68,10 @@ export interface Reserve {
    * With the reserve active, brings in the public hostnames still served
    * from the zone (added to the config during a block) and returns what
    * changed: each gets its custom hostname on the reserve and the validation
-   * TXT records, and moves to the reserve once both the hostname and its
-   * certificate are active. Hosts already moved are never touched. Reuses the
-   * records `isActive` read on this instance, so with nothing left out it
-   * makes no call. If a move fails, that host goes back to its zone.
+   * TXT records, and moves to the reserve once its certificate is active.
+   * Hosts already moved are never touched. Reuses the records `isActive`
+   * read on this instance, so with nothing left out it makes no call. If a
+   * move fails, that host goes back to its zone.
    */
   catchUp(changes: Messages['change']): Promise<string[]>;
 }
@@ -276,10 +276,9 @@ export function createReserve(apis: SiteApis, site: SiteConfig, config: Pick<Res
       if (moved.size === 0 || left.length === 0) return [];
 
       const { changes, hostnames } = await ensureCustomHostnames(all, say, left);
-      const ready = left.filter((host) => {
-        const h = hostnames.find((x) => x.hostname === host.name);
-        return h?.status === 'active' && h.ssl?.status === 'active';
-      });
+      // The certificate alone: Cloudflare activates the hostname of a name proxied on
+      // another zone only once that name points at the reserve, never by TXT.
+      const ready = left.filter((host) => hostnames.find((x) => x.hostname === host.name)?.ssl?.status === 'active');
       const attached = ready.some((h) => h.via === 'worker') ? await domains() : [];
       for (const host of ready) {
         try {

@@ -202,10 +202,9 @@ export function createReserve(apis, site, config) {
             if (moved.size === 0 || left.length === 0)
                 return [];
             const { changes, hostnames } = await ensureCustomHostnames(all, say, left);
-            const ready = left.filter((host) => {
-                const h = hostnames.find((x) => x.hostname === host.name);
-                return h?.status === 'active' && h.ssl?.status === 'active';
-            });
+            // The certificate alone: Cloudflare activates the hostname of a name proxied on
+            // another zone only once that name points at the reserve, never by TXT.
+            const ready = left.filter((host) => hostnames.find((x) => x.hostname === host.name)?.ssl?.status === 'active');
             const attached = ready.some((h) => h.via === 'worker') ? await domains() : [];
             for (const host of ready) {
                 try {

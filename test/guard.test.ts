@@ -227,7 +227,8 @@ describe('guard', () => {
     expect(s.cf.world.records.filter((r) => r.type === 'TXT').map((r) => r.name)).toEqual(['_acme-challenge.blog.example.org']);
     expect(cnames(s)).toEqual(['app.example.org', 'example.org']);
 
-    Object.assign(hostname()!, { status: 'active', ssl: { status: 'active', validation_records: [] } });
+    // The hostname of a name proxied on another zone stays pending until it points at the reserve.
+    Object.assign(hostname()!, { ssl: { status: 'active', validation_records: [] } });
     await s.run();
     expect(cnames(s)).toEqual(['app.example.org', 'blog.example.org', 'example.org']);
     expect(s.subjects()).toEqual(Array(3).fill('Guard: reserve maintenance (docs)'));
