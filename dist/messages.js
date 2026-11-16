@@ -1,3 +1,15 @@
+const minutes = (ms) => Math.round(ms / 60_000);
+/** `37 min`, `8 h 5 min`. */
+const duration = (ms) => {
+    const m = minutes(ms);
+    return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
+};
+/** The recovery notice: a sentence, then one line per list; only the words are translated. */
+const listsRecoveredWith = (o) => ({ staleMs, ageMs, runbook }) => `${o.intro(duration(staleMs))}\n\n` +
+    Object.entries(ageMs)
+        .map(([isp, age]) => `${isp}: ${age === null ? o.unreadable : o.age(minutes(age))}`)
+        .join('\n') +
+    (runbook ? `\nRunbook: ${runbook}` : '');
 /** The details block shared by every alert; only the labels are translated. */
 const detailsWith = (labels) => ({ reason, zoneIps, reserveIps, mode, runbook }) => `${reason}.\n\n${labels.zoneIps}: ${zoneIps.join(', ')}\n${labels.reserveIps}: ${reserveIps.join(', ')}\n${labels.mode}: ${mode}` +
     (runbook ? `\nRunbook: ${runbook}` : '');
@@ -28,12 +40,18 @@ const en = (c) => {
             deactivated: 'reserve deactivated',
             maintenance: 'reserve maintenance',
             failing: 'failing',
+            listsRecovered: 'lists recovered',
         },
         body: {
             activated: `${hosts}: now served from ${c.fallbackHost}.` +
                 (workers ? `\n\nDo not deploy ${workers} until the guard reports the way back: the deploy would fail recreating its Custom Domains.` : ''),
             deactivated: `${hosts}: back on the zone.` + (workers ? `\n\nIf someone deployed ${workers} while the reserve was active, that deploy failed: run it again.` : ''),
             failing: (error) => `Three runs in a row failed. The last one:\n\n${error}`,
+            listsRecovered: listsRecoveredWith({
+                intro: (stale) => `The ${c.blocklistName} lists are fresh again after ${stale} stale or unreadable: the guard decides again.`,
+                age: (m) => `updated ${m} min ago`,
+                unreadable: 'unreadable',
+            }),
             details: detailsWith({ zoneIps: 'Watched zone IPs', reserveIps: 'Watched reserve IPs', mode: 'Mode' }),
         },
         change: {
@@ -75,12 +93,18 @@ const es = (c) => {
             deactivated: 'reserva desactivada',
             maintenance: 'mantenimiento de la reserva',
             failing: 'falla',
+            listsRecovered: 'listas recuperadas',
         },
         body: {
             activated: `${hosts}: sirve ahora desde ${c.fallbackHost}.` +
                 (workers ? `\n\nNo despliegues ${workers} hasta que el vigía avise de la vuelta: el deploy fallaría al recrear los Custom Domains.` : ''),
             deactivated: `${hosts}: vuelve a su zona.` + (workers ? `\n\nSi alguien desplegó ${workers} con la reserva activa, ese deploy falló: relánzalo.` : ''),
             failing: (error) => `Tres pasadas seguidas con error. La última:\n\n${error}`,
+            listsRecovered: listsRecoveredWith({
+                intro: (stale) => `Las listas de ${c.blocklistName} vuelven a estar al día tras ${stale} viejas o ilegibles: el vigía vuelve a decidir.`,
+                age: (m) => `actualizada hace ${m} min`,
+                unreadable: 'ilegible',
+            }),
             details: detailsWith({ zoneIps: 'IPs de la zona vigiladas', reserveIps: 'IPs de la reserva vigiladas', mode: 'Modo' }),
         },
         change: {

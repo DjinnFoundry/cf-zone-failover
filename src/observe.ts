@@ -3,6 +3,8 @@ import type { BlocklistSource } from './config.js';
 export interface Blocklists {
   /** IPs blocked right now, per ISP. */
   byIsp: Record<string, Set<string>>;
+  /** Age of each list from its Last-Modified; null if it could not be read or has none. */
+  ageMs: Record<string, number | null>;
   /** Every list is recent and could be read. */
   fresh: boolean;
 }
@@ -15,7 +17,7 @@ export async function readBlocklists(
 ): Promise<Blocklists> {
   const results = await Promise.all(
     source.isps.map(async (isp) => {
-      const unreadable = { isp, ips: new Set<string>(), fresh: false };
+      const unreadable = { isp, ips: new Set<string>(), ageMs: null };
       const res = await fetcher(source.url(isp), { headers: { 'cache-control': 'no-cache' } }).catch(() => null);
       if (!res?.ok) return unreadable;
       const modified = Date.parse(res.headers.get('last-modified') ?? '');
@@ -25,12 +27,13 @@ export async function readBlocklists(
           .map((line) => line.trim())
           .filter(Boolean),
       );
-      return { isp, ips, fresh: Number.isFinite(modified) && opts.now - modified <= opts.maxAgeMs };
+      return { isp, ips, ageMs: Number.isFinite(modified) ? opts.now - modified : null };
     }),
   );
   return {
     byIsp: Object.fromEntries(results.map((r) => [r.isp, r.ips])),
-    fresh: results.every((r) => r.fresh),
+    ageMs: Object.fromEntries(results.map((r) => [r.isp, r.ageMs])),
+    fresh: results.every((r) => r.ageMs !== null && r.ageMs <= opts.maxAgeMs),
   };
 }
 

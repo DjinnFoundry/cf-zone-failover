@@ -32,6 +32,22 @@ describe('blocklists', () => {
     expect((await read(offline)).fresh).toBe(false);
   });
 
+  it('gives the age of each list, null when it could not be read', async () => {
+    const fetcher = vi.fn(async (url: string) => {
+      if (url.includes('orange')) return new Response('', { status: 503 });
+      if (url.includes('vodafone')) return new Response('');
+      return list('', url.includes('digi') ? NOW - MAX_AGE - 60_000 : NOW - 120_000);
+    }) as unknown as typeof fetch;
+
+    expect((await read(fetcher)).ageMs).toEqual({
+      movistar: 120_000,
+      orange: null,
+      vodafone: null,
+      digi: MAX_AGE + 60_000,
+      masmovil: 120_000,
+    });
+  });
+
   it('a list without Last-Modified is not trusted', async () => {
     expect((await read((async () => new Response('')) as unknown as typeof fetch)).fresh).toBe(false);
   });

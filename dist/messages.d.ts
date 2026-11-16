@@ -30,11 +30,18 @@ export interface Messages {
         deactivated: string;
         maintenance: string;
         failing: string;
+        listsRecovered: string;
     };
     body: {
         activated: string;
         deactivated: string;
         failing: (error: string) => string;
+        /** The lists are fresh again after a stale-lists alert. */
+        listsRecovered: (o: {
+            staleMs: number;
+            ageMs: Record<string, number | null>;
+            runbook?: string;
+        }) => string;
         details: (o: {
             reason: string;
             zoneIps: string[];

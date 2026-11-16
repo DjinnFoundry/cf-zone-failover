@@ -7,14 +7,23 @@ import { CONFIG, DOCS, DOCS_IPS, FALLBACK, NOW, RESERVE_IPS, SHOP, ZONE_IPS } fr
 
 const { releaseAfterMs: RELEASE, ipMemoryMs: MEMORY } = DEFAULT_TIMING;
 
-/** The blocklists, DoH and the reserve health check. */
-function internet(opts: { blocked?: Record<string, string[]>; healthy?: boolean; zoneDns?: string[] }) {
+interface Internet {
+  blocked?: Record<string, string[]>;
+  healthy?: boolean;
+  zoneDns?: string[];
+  /** hayahora.futbol does not answer; read on every request, so a test can flip it. */
+  listsDown?: boolean;
+}
+
+/** The blocklists (updated a minute before `clock`), DoH and the reserve health check. */
+function internet(opts: Internet, clock: () => number) {
   return vi.fn(async (input: string) => {
     const url = String(input);
     const isp = url.match(/blocked-(\w+)\.txt/)?.[1];
     if (isp) {
+      if (opts.listsDown) return new Response('', { status: 503 });
       return new Response((opts.blocked?.[isp] ?? []).join('\n'), {
-        headers: { 'last-modified': new Date(NOW - 60_000).toUTCString() },
+        headers: { 'last-modified': new Date(clock() - 60_000).toUTCString() },
       });
     }
     if (url.includes('dns.google') || url.includes('dns-query')) {
@@ -36,17 +45,16 @@ function memoryKv(initial: Record<string, string> = {}) {
   };
 }
 
-function setup(opts: {
-  zoneDns?: string[];
-  blocked?: Record<string, string[]>;
-  healthy?: boolean;
+type Options = Internet & {
   /** Sites whose reserve is active at the start. */
   active?: string[];
   kv?: Record<string, string>;
   mode?: GuardDeps['mode'];
   hostnames?: NonNullable<Parameters<typeof normalCloudflare>[0]>['hostnames'];
   config?: FailoverConfig;
-}) {
+};
+
+function setup(opts: Options) {
   const cf = normalCloudflare({ hostnames: opts.hostnames });
   const config = opts.config ?? CONFIG;
   const kv = memoryKv(opts.kv);
@@ -59,7 +67,7 @@ function setup(opts: {
     log: () => {},
     mode: opts.mode ?? 'auto',
     now: NOW,
-    fetcher: internet(opts),
+    fetcher: internet(opts, () => deps.now),
     runbook: 'docs/runbook.md',
   };
   const run = () => guard.run(deps);
@@ -176,6 +184,70 @@ describe('guard', () => {
     expect(s.subjects()).toEqual(['Guard: problem']);
   });
 
+  it('when stale lists come back it says so once, with how long they were out and the age of each list', async () => {
+    const net: Options = { listsDown: true };
+    const s = setup(net);
+
+    await s.run();
+    s.deps.now = NOW + 20 * 60_000;
+    await s.run();
+    expect(s.subjects()).toEqual(['Guard: problem']);
+    expect(s.kv.data.get('lists:staleSince')).toBe(String(NOW));
+
+    net.listsDown = false;
+    s.deps.now = NOW + 37 * 60_000;
+    await s.run();
+    s.deps.now = NOW + 39 * 60_000;
+    await s.run();
+
+    expect(s.subjects()).toEqual(['Guard: problem', 'Guard: lists recovered']);
+    expect(s.notify.mock.calls[1]![1]).toBe(
+      'The hayahora.futbol lists are fresh again after 37 min stale or unreadable: the guard decides again.\n\n' +
+        'movistar: updated 1 min ago\norange: updated 1 min ago\nvodafone: updated 1 min ago\ndigi: updated 1 min ago\nmasmovil: updated 1 min ago\n' +
+        'Runbook: docs/runbook.md',
+    );
+    expect(s.kv.data.has('lists:staleSince')).toBe(false);
+  });
+
+  it('a stale-lists alert repeated after its cooldown keeps the start of the incident', async () => {
+    const net: Options = { listsDown: true };
+    const s = setup(net);
+
+    await s.run();
+    await s.deps.state.delete('alert:stale-lists');
+    s.deps.now = NOW + 7 * 3600_000;
+    await s.run();
+    net.listsDown = false;
+    s.deps.now = NOW + 8 * 3600_000 + 5 * 60_000;
+    await s.run();
+
+    expect(s.subjects()).toEqual(['Guard: problem', 'Guard: problem', 'Guard: lists recovered']);
+    expect(s.notify.mock.calls[2]![1]).toMatch(/ after 8 h 5 min stale/);
+  });
+
+  it('no recovery mail when no stale-lists alert went out', async () => {
+    // An alert from an earlier incident is still in its cooldown: this one is not mailed.
+    const net: Options = { listsDown: true, kv: { 'alert:stale-lists': String(NOW - 3600_000) } };
+    const s = setup(net);
+
+    await s.run();
+    net.listsDown = false;
+    await s.run();
+
+    expect(s.subjects()).toEqual([]);
+  });
+
+  it('in observe mode the recovery is marked as such', async () => {
+    const net: Options = { listsDown: true, mode: 'observe' };
+    const s = setup(net);
+
+    await s.run();
+    net.listsDown = false;
+    await s.run();
+
+    expect(s.subjects()).toEqual(['[observe] Guard: problem', '[observe] Guard: lists recovered']);
+  });
+
   it('also watches IPs the guard resolves even if they are not seeded', async () => {
     const s = setup({ zoneDns: ['203.0.113.40'], blocked: { vodafone: ['203.0.113.40'] } });
 
@@ -252,5 +324,20 @@ describe('guard', () => {
 
     expect(s.subjects()).toEqual(['Guard: reserva ACTIVADA (shop)']);
     expect(s.notify.mock.calls[0]![1]).toMatch(/^example\.com, www\.example\.com: sirve ahora desde fallback\.example\.net/);
+  });
+
+  it('says in Spanish that the lists are back', async () => {
+    const net: Options = { listsDown: true, config: { ...CONFIG, locale: 'es' } };
+    const s = setup(net);
+
+    await s.run();
+    net.listsDown = false;
+    s.deps.now = NOW + 75 * 60_000;
+    await s.run();
+
+    expect(s.subjects()).toEqual(['Guard: problema', 'Guard: listas recuperadas']);
+    expect(s.notify.mock.calls[1]![1]).toMatch(
+      /^Las listas de hayahora\.futbol vuelven a estar al día tras 1 h 15 min viejas o ilegibles: el vigía vuelve a decidir\.\n\nmovistar: actualizada hace 1 min\n/,
+    );
   });
 });

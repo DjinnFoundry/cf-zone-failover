@@ -35,7 +35,7 @@ Status: ZetaRead runs it in production, and the guard switched it on its own in 
 ## Install
 
 ```bash
-pnpm add github:DjinnFoundry/cf-zone-failover#v0.2.3
+pnpm add github:DjinnFoundry/cf-zone-failover#v0.2.6
 ```
 
 The compiled JavaScript is committed in `dist/`, so no build step runs on install.
@@ -159,7 +159,7 @@ The step-by-step setup (reserve zone, custom hostnames, validation records, toke
 
 Every run (a cron of `*/2 * * * *` works well), for each site:
 
-1. Reads every ISP list once. If any is older than 30 minutes or unreadable, it decides nothing and alerts once.
+1. Reads every ISP list once. If any is older than 30 minutes or unreadable, it decides nothing and alerts once. When they are fresh again after that alert, it mails once more, with how long they were out and the age of each list.
 2. Watches the union of the site's seed IPs, what its probe resolves to now over DoH, and what it resolved to in the last 24 h.
 3. **Activates** as soon as one watched IP is blocked by any ISP, if the reserve health URL answers 200 and the reserve IPs are not blocked. If activation fails halfway it puts every name back.
 4. **Goes back** after 30 minutes without a block on any ISP (blocks stop and resume within a match), or at once if the reserve is the one blocked.

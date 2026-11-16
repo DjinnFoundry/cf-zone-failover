@@ -33,11 +33,14 @@ export interface Messages {
     deactivated: string;
     maintenance: string;
     failing: string;
+    listsRecovered: string;
   };
   body: {
     activated: string;
     deactivated: string;
     failing: (error: string) => string;
+    /** The lists are fresh again after a stale-lists alert. */
+    listsRecovered: (o: { staleMs: number; ageMs: Record<string, number | null>; runbook?: string }) => string;
     details: (o: { reason: string; zoneIps: string[]; reserveIps: string[]; mode: string; runbook?: string }) => string;
   };
   change: {
@@ -51,6 +54,24 @@ export interface Messages {
     movedToReserve: (host: string, fallbackHost: string) => string;
   };
 }
+
+const minutes = (ms: number) => Math.round(ms / 60_000);
+
+/** `37 min`, `8 h 5 min`. */
+const duration = (ms: number) => {
+  const m = minutes(ms);
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
+};
+
+/** The recovery notice: a sentence, then one line per list; only the words are translated. */
+const listsRecoveredWith =
+  (o: { intro: (stale: string) => string; age: (minutes: number) => string; unreadable: string }): Messages['body']['listsRecovered'] =>
+  ({ staleMs, ageMs, runbook }) =>
+    `${o.intro(duration(staleMs))}\n\n` +
+    Object.entries(ageMs)
+      .map(([isp, age]) => `${isp}: ${age === null ? o.unreadable : o.age(minutes(age))}`)
+      .join('\n') +
+    (runbook ? `\nRunbook: ${runbook}` : '');
 
 /** The details block shared by every alert; only the labels are translated. */
 const detailsWith =
@@ -86,6 +107,7 @@ const en = (c: MessageContext): Messages => {
       deactivated: 'reserve deactivated',
       maintenance: 'reserve maintenance',
       failing: 'failing',
+      listsRecovered: 'lists recovered',
     },
     body: {
       activated:
@@ -94,6 +116,11 @@ const en = (c: MessageContext): Messages => {
       deactivated:
         `${hosts}: back on the zone.` + (workers ? `\n\nIf someone deployed ${workers} while the reserve was active, that deploy failed: run it again.` : ''),
       failing: (error) => `Three runs in a row failed. The last one:\n\n${error}`,
+      listsRecovered: listsRecoveredWith({
+        intro: (stale) => `The ${c.blocklistName} lists are fresh again after ${stale} stale or unreadable: the guard decides again.`,
+        age: (m) => `updated ${m} min ago`,
+        unreadable: 'unreadable',
+      }),
       details: detailsWith({ zoneIps: 'Watched zone IPs', reserveIps: 'Watched reserve IPs', mode: 'Mode' }),
     },
     change: {
@@ -136,6 +163,7 @@ const es = (c: MessageContext): Messages => {
       deactivated: 'reserva desactivada',
       maintenance: 'mantenimiento de la reserva',
       failing: 'falla',
+      listsRecovered: 'listas recuperadas',
     },
     body: {
       activated:
@@ -144,6 +172,11 @@ const es = (c: MessageContext): Messages => {
       deactivated:
         `${hosts}: vuelve a su zona.` + (workers ? `\n\nSi alguien desplegó ${workers} con la reserva activa, ese deploy falló: relánzalo.` : ''),
       failing: (error) => `Tres pasadas seguidas con error. La última:\n\n${error}`,
+      listsRecovered: listsRecoveredWith({
+        intro: (stale) => `Las listas de ${c.blocklistName} vuelven a estar al día tras ${stale} viejas o ilegibles: el vigía vuelve a decidir.`,
+        age: (m) => `actualizada hace ${m} min`,
+        unreadable: 'ilegible',
+      }),
       details: detailsWith({ zoneIps: 'IPs de la zona vigiladas', reserveIps: 'IPs de la reserva vigiladas', mode: 'Modo' }),
     },
     change: {

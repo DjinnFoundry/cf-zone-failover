@@ -2,6 +2,8 @@ import type { BlocklistSource } from './config.js';
 export interface Blocklists {
     /** IPs blocked right now, per ISP. */
     byIsp: Record<string, Set<string>>;
+    /** Age of each list from its Last-Modified; null if it could not be read or has none. */
+    ageMs: Record<string, number | null>;
     /** Every list is recent and could be read. */
     fresh: boolean;
 }

@@ -34,6 +34,9 @@ export interface SiteOutcome {
 type Mode = GuardDeps['mode'];
 type Event = 'activated' | 'deactivated' | 'maintenance';
 
+/** When the stale-lists incident whose alert went out began; cleared by the recovery notice. */
+const STALE_SINCE = 'lists:staleSince';
+
 /** Short, stable key for a text (KV keys are capped at 512 bytes). */
 const hash = (text: string) => {
   let h = 5381;
@@ -152,7 +155,11 @@ export function createGuard(config: FailoverConfig, label: string) {
         // Problems are about the lists or the reserve, shared by every site: one alert, not one per site.
         if (decision.alert) {
           const alert = decision.alert;
-          await once(alert, () => notify(subject(mode, messages.subject.problem), withDetails(st.alert[alert])));
+          await once(alert, async () => {
+            await notify(subject(mode, messages.subject.problem), withDetails(st.alert[alert]));
+            // A repeat after the cooldown keeps the incident's start.
+            if (alert === 'stale-lists' && !(await state.get(STALE_SINCE))) await state.put(STALE_SINCE, String(now));
+          });
         }
 
         const act = async (kind: 'activated' | 'deactivated', run: () => Promise<void>) => {
@@ -199,6 +206,15 @@ export function createGuard(config: FailoverConfig, label: string) {
 
       for (const e of events.values()) {
         await notify(subject(e.mode, `${messages.subject[e.kind]} (${e.sites.join(', ')})`), e.bodies.join('\n\n---\n\n'));
+      }
+      // Closes the stale-lists alert, once: only an incident that was mailed leaves the date.
+      const staleSince = lists.fresh ? await state.get(STALE_SINCE) : null;
+      if (staleSince) {
+        await notify(
+          subject(deps.mode, messages.subject.listsRecovered),
+          messages.body.listsRecovered({ staleMs: now - Number(staleSince), ageMs: lists.ageMs, runbook: deps.runbook }),
+        );
+        await state.delete(STALE_SINCE);
       }
       const failed = outcomes.filter((o) => o.error);
       if (failed.length > 0) throw new Error(failed.map((o) => `${o.site}: ${o.error}`).join('\n'));
