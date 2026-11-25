@@ -30,7 +30,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "check": "npm run typecheck && npm test && npm run build && git diff --exit-code -- dist",
+    "check": "pnpm run typecheck && pnpm test && pnpm run build && git diff --exit-code -- dist",
     "leaks": "node scripts/public-data.mjs --authors"
   },
   "keywords": [
@@ -44,6 +44,7 @@
   "engines": {
     "node": ">=20"
   },
+  "packageManager": "pnpm@11.28.13",
   "devDependencies": {
     "@cloudflare/workers-types": "4.20260702.1",
     "typescript": "5.9.3",
